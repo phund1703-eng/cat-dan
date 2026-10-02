@@ -11,7 +11,7 @@ class WhiteboardEngine:
     def __init__(self):
         pass
 
-    def create_video(self, script: dict, language: str, output_path: str, format: str = 'shorts') -> str:
+    async def create_video(self, script: dict, language: str, output_path: str, format: str = 'shorts') -> str:
         """Create whiteboard style video."""
         try:
             logger.info(f"Creating whiteboard video: {output_path}")

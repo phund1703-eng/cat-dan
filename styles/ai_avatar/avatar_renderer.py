@@ -13,7 +13,7 @@ class AvatarRenderer:
     def __init__(self):
         self.sadtalker = SadTalkerClient()
 
-    def create_video(self, script: dict, language: str, output_path: str, format: str = 'shorts', avatar_image: str = None) -> str:
+    async def create_video(self, script: dict, language: str, output_path: str, format: str = 'shorts', avatar_image: str = None) -> str:
         """Create avatar video."""
         try:
             logger.info(f"Creating avatar video: {output_path}")

@@ -11,7 +11,7 @@ class ClipEngine:
     def __init__(self):
         pass
 
-    def create_video(self, script: dict, language: str, output_path: str, format: str = 'shorts') -> str:
+    async def create_video(self, script: dict, language: str, output_path: str, format: str = 'shorts') -> str:
         """Create video with clips and text overlays."""
         try:
             logger.info(f"Creating clip video: {output_path}")

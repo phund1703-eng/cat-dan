@@ -586,8 +586,60 @@ def _execute_stages_4_and_5(db, job_id: str):
     job_dir = Path("data/output") / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
 
+    final_video_file = job_dir / "final_video.mp4"
+
     # -------------------------------------------------------------
-    # STAGE 4: rendering
+    # STAGE 4 (primary): CollageEngine — engine cắt dán thật (Task 1.2)
+    # -------------------------------------------------------------
+    collage_rendered = False
+    style_key = (getattr(job, "style", "") or "collage_broll").lower()
+    if style_key == "collage_broll":
+        try:
+            from styles.collage_broll.collage_engine import CollageEngine
+
+            logger.info(f"--- [Job {job_id}] STAGE 4: Rendering with CollageEngine (stop-motion collage) ---")
+            audio_files: List[str] = []
+            media_files: List[str] = []
+            for i, scene in enumerate(scenes):
+                scene_idx = scene.get("scene_index", scene.get("index", i))
+                resolved_img = sb_image_map.get(scene_idx) or scene.get("image_path")
+                if not resolved_img:
+                    resolved_img = str(job_dir / "images" / f"scene_{i:03d}.png")
+                scene["image_path"] = resolved_img
+                media_files.append(resolved_img)
+                audio_files.append(scene.get("audio_path") or str(job_dir / "audio" / f"scene_{i:03d}.wav"))
+
+            script_payload = {
+                "title": pipeline_data.get("script", {}).get("title") or job.topic,
+                "scenes": scenes,
+            }
+
+            async def _render_collage() -> str:
+                engine = CollageEngine()
+                return await asyncio.wait_for(
+                    engine.create_video(
+                        script=script_payload,
+                        language=job.language or "vi",
+                        output_path=str(final_video_file),
+                        format="shorts",
+                        audio_files=audio_files,
+                        media_files=media_files,
+                    ),
+                    timeout=600,
+                )
+
+            run_in_async_loop(_render_collage())
+            if final_video_file.exists() and final_video_file.stat().st_size > 0:
+                collage_rendered = True
+                pipeline_data["render_engine"] = "collage_engine"
+                logger.success(f"--- [Job {job_id}] CollageEngine rendered: {final_video_file} ---")
+        except Exception as e_collage:
+            logger.warning(f"CollageEngine render failed for job {job_id} ({e_collage}); falling back to Ken Burns zoompan")
+            pipeline_data["render_engine"] = "ken_burns_fallback"
+            pipeline_data["collage_error"] = str(e_collage)
+
+    # -------------------------------------------------------------
+    # STAGE 4: rendering (subtitle + FFmpeg commands; zoompan = fallback)
     # -------------------------------------------------------------
     logger.info(f"--- [Job {job_id}] STAGE 4: Generating Subtitles & FFmpeg Commands ---")
     sub_dir = job_dir / "subtitles"
@@ -628,15 +680,21 @@ def _execute_stages_4_and_5(db, job_id: str):
         clip_p = (clips_dir / f"clip_{i:03d}.mp4").resolve().as_posix()
         total_frames = int(dur * fps)
 
-        cmd = (
-            f'ffmpeg -y -loop 1 -i "{img_p}" -i "{audio_p}" -t {dur:.2f} '
-            f'-filter_complex "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,'
-            f'zoompan=z=\'min(zoom+0.001,1.05)\':x=\'iw/2-(iw/zoom/2)\':y=\'ih/2-(ih/zoom/2)\':'
-            f'd={total_frames}:s=1080x1920:fps={fps}[v0];[v0]ass=\'{escaped_sub}\'[v]" '
-            f'-map "[v]" -map 1:a -c:v libx264 -preset veryfast -crf 18 -c:a aac -b:a 192k "{clip_p}"'
-        )
-        ffmpeg_cmds.append(cmd)
+        if not collage_rendered:
+            cmd = (
+                f'ffmpeg -y -loop 1 -i "{img_p}" -i "{audio_p}" -t {dur:.2f} '
+                f'-filter_complex "[0:v]scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920,'
+                f'zoompan=z=\'min(zoom+0.001,1.05)\':x=\'iw/2-(iw/zoom/2)\':y=\'ih/2-(ih/zoom/2)\':'
+                f'd={total_frames}:s=1080x1920:fps={fps}[v0];[v0]ass=\'{escaped_sub}\'[v]" '
+                f'-map "[v]" -map 1:a -c:v libx264 -preset veryfast -crf 18 -c:a aac -b:a 192k "{clip_p}"'
+            )
+            ffmpeg_cmds.append(cmd)
         clip_paths.append(clip_p)
+
+    if collage_rendered:
+        ffmpeg_cmds = [
+            f"CollageEngine.create_video(scenes={len(scenes)}, format=shorts) -> {final_video_file.resolve().as_posix()}"
+        ]
 
     concat_file = job_dir / "concat_list.txt"
     with open(concat_file, "w", encoding="utf-8") as f:
@@ -663,7 +721,10 @@ def _execute_stages_4_and_5(db, job_id: str):
     rendered = False
     synthetic = False
     last_ffmpeg_error = ""
-    if ffmpeg_available:
+    if collage_rendered:
+        rendered = True
+        logger.success(f"--- [Job {job_id}] STAGE 5: Using CollageEngine output as master video ---")
+    elif ffmpeg_available:
         try:
             logger.info("FFmpeg detected, executing scene clip rendering...")
             clips_rendered = True

@@ -13,7 +13,7 @@ class AnimationRenderer:
     def __init__(self):
         self.generator = ManimGenerator()
 
-    def create_video(self, script: dict, language: str, output_path: str, format: str = 'shorts') -> str:
+    async def create_video(self, script: dict, language: str, output_path: str, format: str = 'shorts') -> str:
         """Full pipeline: generate Manim code → render animations → add TTS audio → subtitles → music."""
         try:
             logger.info(f"Creating 2D animation video: {output_path}")
