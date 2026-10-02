@@ -1,0 +1,75 @@
+# AutoVideoFactory — Python Dependencies
+# Cài đặt: pip install -r requirements.txt
+
+# ===== Core =====
+python-dotenv>=1.0.0
+pyyaml>=6.0
+loguru>=0.7.0
+rich>=13.0.0                   # Console output đẹp
+tqdm>=4.66.0                   # Progress bars
+httpx>=0.27.0                  # Async HTTP client
+aiofiles>=23.0.0               # Async file ops
+Pillow>=10.0.0                 # Image processing
+
+# ===== LLM — Google Gemini =====
+google-generativeai>=0.8.0
+
+# ===== TTS =====
+edge-tts>=6.1.9                # Edge TTS (fallback, miễn phí)
+fish-audio-sdk>=0.1.0         # Fish Audio API client
+TTS>=0.22.0                   # Coqui TTS (XTTS v2 + viXTTS)
+
+# ===== Video Editing =====
+moviepy>=1.0.3                 # High-level video editing
+ffmpeg-python>=0.2.0          # FFmpeg Python wrapper
+imageio>=2.34.0
+imageio-ffmpeg>=0.4.9
+
+# ===== Subtitle / ASR =====
+faster-whisper>=1.0.0         # Auto subtitle generation
+# whisperx>=3.1.5              # Uncomment nếu cần word-level timestamps
+
+# ===== Stock Media APIs =====
+requests>=2.31.0
+pexels-api-py>=1.0.0          # Pexels Python wrapper
+
+# ===== Dashboard — FastAPI Backend =====
+fastapi>=0.111.0
+uvicorn[standard]>=0.30.0
+pydantic>=2.7.0
+pydantic-settings>=2.3.0
+sqlalchemy>=2.0.0
+alembic>=1.13.0
+
+# ===== Dashboard — Streamlit Frontend =====
+streamlit>=1.36.0
+streamlit-option-menu>=0.3.12  # Nav menu đẹp
+plotly>=5.22.0                 # Charts
+pandas>=2.2.0
+
+# ===== Job Queue =====
+celery>=5.4.0
+redis>=5.0.0
+flower>=2.0.1                  # Celery monitoring
+
+# ===== Social Media Publishing =====
+google-api-python-client>=2.133.0  # YouTube API
+google-auth>=2.29.0
+google-auth-oauthlib>=1.2.0
+
+# ===== Animation (Manim) =====
+manim>=0.18.0                  # Sẽ cài sau cùng vì có nhiều dependencies
+
+# ===== Utilities =====
+apscheduler>=3.10.4            # Job scheduling
+feedparser>=6.0.11             # RSS feed parsing
+pytrends>=4.9.2                # Google Trends API
+
+# ===== Optional — AI Image Generation =====
+# Cài nếu muốn dùng Stable Diffusion API
+# Không cần nếu chỉ dùng stock media
+# diffusers>=0.29.0
+# transformers>=4.41.0
+# torch>=2.3.0
+# torchvision>=0.18.0
+# accelerate>=0.30.0

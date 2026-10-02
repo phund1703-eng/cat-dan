@@ -1,0 +1,91 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# C extensions
+*.so
+
+# Distribution / packaging
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual Environments
+venv/
+env/
+ENV/
+env.bak/
+venv.bak/
+
+# Environment Variables & Secrets (CRITICAL: Do not leak API keys)
+.env
+.env.local
+.env.*.local
+!.env.example
+
+# Pytest / Coverage / Unit tests / Agent traces
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+nosetests.xml
+coverage.xml
+*.cover
+*.py,cover
+.agents/
+
+# Logs & Databases
+logs/
+*.log
+*.sqlite
+*.sqlite3
+*.db
+
+# Runtime, Output & Temporary Folders
+output/
+data/output/
+data/cache/
+data/jobs/
+data/drafts/
+data/temp_*
+data/test_*
+data/work_*
+data/scripts/*
+!data/scripts/.gitkeep
+data/asset_library/*
+!data/asset_library/.gitkeep
+temp_gbro/
+debug_frames_sc3/
+debug_video_sampled_frames/
+
+# Temporary / Debug files in root
+debug_*.jpg
+debug_*.png
+debug_*.mp4
+test_frame_*.png
+test_preview*.wav
+*.mp4
+*.wav
+*.avi
+
+# OS / Editor specifics
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+*.swo

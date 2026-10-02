@@ -1,0 +1,173 @@
+# ====================================================
+# AutoVideoFactory — Cấu Hình Kênh Mạng Xã Hội
+# Mỗi phong cách video → 1 kênh riêng
+# ====================================================
+
+channels:
+
+  # ===== Kênh 1: Animation 2D =====
+  animation_2d:
+    name: "Animation Giáo Dục"
+    style: animation_2d
+    language: vi                   # vi | en | both
+    
+    youtube:
+      channel_id: ""               # Điền YouTube Channel ID của bạn
+      credentials_file: "config/credentials/youtube_anim.json"
+      default_tags:
+        - "giáo dục"
+        - "animation"
+        - "học tiếng Việt"
+        - "explainer"
+      playlist_id: ""              # Optional: thêm vào playlist tự động
+      
+    tiktok:
+      username: ""                 # TikTok username
+      session_file: "config/credentials/tiktok_anim.json"
+      default_hashtags:
+        - "#giáodục"
+        - "#animation"
+        - "#hoctienganh"
+        
+    facebook:
+      page_id: ""
+      credentials_file: "config/credentials/facebook_anim.json"
+      
+    schedule:
+      enabled: true
+      timezone: "Asia/Ho_Chi_Minh"
+      posting_times:               # Giờ đăng bài tối ưu
+        - "07:00"
+        - "12:00"
+        - "20:00"
+      days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+      max_per_day: 2
+
+  # ===== Kênh 2: Cắt Dán / Collage =====
+  collage_broll:
+    name: "Video Xu Hướng"
+    style: collage_broll
+    language: vi
+    
+    youtube:
+      channel_id: ""
+      credentials_file: "config/credentials/youtube_collage.json"
+      default_tags:
+        - "xu hướng"
+        - "viral"
+        - "thú vị"
+        - "trending"
+        
+    tiktok:
+      username: ""
+      session_file: "config/credentials/tiktok_collage.json"
+      default_hashtags:
+        - "#viral"
+        - "#trending"
+        - "#tiktokviệtnam"
+        
+    facebook:
+      page_id: ""
+      credentials_file: "config/credentials/facebook_collage.json"
+      
+    schedule:
+      enabled: true
+      timezone: "Asia/Ho_Chi_Minh"
+      posting_times:
+        - "08:00"
+        - "18:00"
+        - "21:00"
+      days: ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+      max_per_day: 3
+
+  # ===== Kênh 3: Video Clip + Text =====
+  clip_overlay:
+    name: "Tin Tức & Tóm Tắt"
+    style: clip_overlay
+    language: vi
+    
+    youtube:
+      channel_id: ""
+      credentials_file: "config/credentials/youtube_clip.json"
+      default_tags:
+        - "tin tức"
+        - "tóm tắt"
+        - "thông tin"
+        
+    tiktok:
+      username: ""
+      session_file: "config/credentials/tiktok_clip.json"
+      default_hashtags:
+        - "#tintuc"
+        - "#tomtat"
+        - "#viral"
+        
+    schedule:
+      enabled: true
+      timezone: "Asia/Ho_Chi_Minh"
+      posting_times:
+        - "07:30"
+        - "12:30"
+        - "19:00"
+      max_per_day: 3
+
+  # ===== Kênh 4: Whiteboard =====
+  whiteboard:
+    name: "Học Thuật & Kiến Thức"
+    style: whiteboard
+    language: vi
+    
+    youtube:
+      channel_id: ""
+      credentials_file: "config/credentials/youtube_whiteboard.json"
+      default_tags:
+        - "whiteboard"
+        - "giáo dục"
+        - "kiến thức"
+        - "học online"
+        
+    tiktok:
+      username: ""
+      session_file: "config/credentials/tiktok_whiteboard.json"
+      default_hashtags:
+        - "#hoctap"
+        - "#kienthuc"
+        - "#whiteboard"
+        
+    schedule:
+      enabled: true
+      timezone: "Asia/Ho_Chi_Minh"
+      posting_times:
+        - "07:00"
+        - "17:00"
+      max_per_day: 2
+
+  # ===== Kênh 5: AI Avatar =====
+  ai_avatar:
+    name: "Marketing & Thương Hiệu"
+    style: ai_avatar
+    language: both                 # Tạo cả Việt và Anh
+    
+    youtube:
+      channel_id: ""
+      credentials_file: "config/credentials/youtube_avatar.json"
+      default_tags:
+        - "marketing"
+        - "thương hiệu"
+        - "AI"
+        
+    tiktok:
+      username: ""
+      session_file: "config/credentials/tiktok_avatar.json"
+      default_hashtags:
+        - "#marketing"
+        - "#thuonghieu"
+        - "#AI"
+        
+    schedule:
+      enabled: true
+      timezone: "Asia/Ho_Chi_Minh"
+      posting_times:
+        - "09:00"
+        - "15:00"
+      max_per_day: 2

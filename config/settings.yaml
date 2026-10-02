@@ -1,0 +1,140 @@
+# ====================================================
+# AutoVideoFactory — Cấu Hình Chính
+# ====================================================
+
+# ===== LLM Settings =====
+llm:
+  provider: gemini               # gemini | openai | ollama
+  model: gemini-3.6-flash        # Model mặc định (nhanh, rẻ)
+  pro_model: gemini-3.6-flash      # Model cao cấp (script chất lượng cao)
+  temperature: 0.7
+  max_tokens: 4096
+
+# ===== TTS Settings =====
+tts:
+  # Engine ưu tiên theo ngôn ngữ
+  vi:
+    primary: fish_audio           # fish_audio | edge_tts | kokoro
+    fallback: edge_tts
+    voice_id: ""                  # Điền sau khi clone giọng
+    speed: 1.0
+    
+  en:
+    primary: kokoro               # kokoro | edge_tts | fish_audio
+    fallback: edge_tts
+    voice_id: ""                  # Điền sau khi clone giọng
+    speed: 1.0
+
+  edge_tts:
+    vi_voice: vi-VN-HoaiMyNeural  # Giọng nữ tiếng Việt
+    en_voice: en-US-JennyNeural   # Giọng nữ tiếng Anh
+
+# ===== Video Settings =====
+video:
+  quality: 1080p                  # 720p | 1080p
+  fps: 30
+  
+  formats:
+    shorts:                        # TikTok/Reels/Shorts
+      width: 1080
+      height: 1920
+      aspect_ratio: "9:16"
+    
+    landscape:                     # YouTube
+      width: 1920
+      height: 1080
+      aspect_ratio: "16:9"
+  
+  subtitle:
+    enabled: true
+    font: "assets/fonts/BeVietnamPro-Bold.ttf"
+    font_size: 56
+    color: "#FFFFFF"
+    stroke_color: "#000000"
+    stroke_width: 2
+    position: bottom               # top | bottom | center
+    
+  background_music:
+    enabled: true
+    volume: 0.08                   # Âm lượng nhạc nền (0.0-1.0)
+    folder: "assets/music"
+
+# ===== Media Settings =====
+media:
+  pexels:
+    per_page: 15
+    orientation: landscape         # portrait | landscape
+    
+  pixabay:
+    per_page: 15
+    video_type: "all"             # all | film | animation
+    
+  cache:
+    enabled: true
+    max_size_gb: 10
+    ttl_days: 30
+
+# ===== Style Defaults =====
+styles:
+  collage_broll:
+    clip_duration: 3.0            # Giây mỗi clip
+    transition: "crossfade"        # crossfade | cut | wipe
+    
+  animation_2d:
+    background_color: "#1A1A2E"
+    text_color: "#E94560"
+    
+  clip_overlay:
+    text_style: "bold_bottom"      # bold_bottom | cinematic | minimal
+    overlay_opacity: 0.6
+    
+  whiteboard:
+    background: "white"
+    pen_color: "#2C2C2C"
+    draw_speed: 1.5
+    
+  ai_avatar:
+    model: "sadtalker"             # sadtalker | musetalk
+    enhance_face: true
+
+# ===== Publishing Settings =====
+publishing:
+  review_required: true            # Bắt buộc duyệt trước khi đăng
+  
+  youtube:
+    enabled: true
+    default_privacy: "unlisted"    # public | unlisted | private
+    default_category: 22           # 22 = People & Blogs
+    auto_chapters: true
+    
+  tiktok:
+    enabled: true
+    mode: "draft"                  # draft | notification (không phải full-auto)
+    
+  facebook:
+    enabled: true
+    default_privacy: "EVERYONE"
+    
+  instagram:
+    enabled: true
+    post_type: "reel"
+
+# ===== Dashboard Settings =====
+dashboard:
+  port: 8501
+  api_port: 8000
+  auto_open_browser: true
+  theme: "dark"                    # dark | light
+
+# ===== Job Queue Settings =====
+queue:
+  max_concurrent_jobs: 2          # Số job chạy đồng thời (phụ thuộc GPU/RAM)
+  retry_failed_jobs: true
+  max_retries: 3
+  
+  priority:                        # Phong cách nào render trước
+    - collage_broll               # Nhanh nhất (~2 phút)
+    - clip_overlay                # ~3 phút
+    - animation_2d                # ~5 phút
+    - whiteboard                  # ~5 phút
+    - ai_avatar                   # Chậm nhất (~10 phút)
