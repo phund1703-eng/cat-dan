@@ -232,13 +232,14 @@ async def main():
     style = sys.argv[2]
     language = sys.argv[3] if len(sys.argv) > 3 else "vi"
     video_format = sys.argv[4] if len(sys.argv) > 4 else "shorts"
-    
-    factory = VideoFactory()
-    result = await factory.create_video(
+
+    # CLI đi qua điểm vào canonical duy nhất (core/pipeline/factory.py)
+    from core.pipeline.factory import run_create_video
+    result = run_create_video(
         topic=topic,
         style=style,
         language=language,
-        video_format=video_format,
+        format=video_format,
     )
     
     print(f"\n✅ Video đã tạo xong!")
