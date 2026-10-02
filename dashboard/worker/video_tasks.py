@@ -243,6 +243,43 @@ def _generate_synthetic_mp4(output_path: str, scenes: list = None) -> str:
     return str(out)
 
 
+def _allow_synthetic_video() -> bool:
+    """Synthetic MP4 is only allowed for tests when ALLOW_SYNTHETIC_VIDEO=1."""
+    return os.environ.get("ALLOW_SYNTHETIC_VIDEO", "").strip() == "1"
+
+
+def _verify_rendered_video(video_path: str, expected_duration: float = 0.0) -> Tuple[bool, str]:
+    """
+    Verifies a rendered MP4 with ffprobe (via get_video_info).
+    Requires: file exists, size > 100KB, has video + audio streams,
+    duration > 0 and (when expected) >= expected_duration - 1s.
+    Returns (ok, detail_message).
+    """
+    p = Path(video_path)
+    if not p.exists():
+        return False, f"Rendered video not found: {video_path}"
+    size = p.stat().st_size
+    if size <= 100 * 1024:
+        return False, f"Rendered video too small ({size} bytes): {video_path}"
+    try:
+        from core.render_engine.ffmpeg_utils import get_video_info
+        info = get_video_info(str(p))
+    except Exception as e:
+        return False, f"ffprobe failed for {video_path}: {e}"
+    if not info:
+        return False, f"ffprobe returned no info for {video_path}"
+    if not info.get("width") or not info.get("height"):
+        return False, f"No video stream detected in {video_path}"
+    if not info.get("has_audio"):
+        return False, f"No audio stream detected in {video_path}"
+    duration = float(info.get("duration", 0.0) or 0.0)
+    if duration <= 0:
+        return False, f"Invalid duration ({duration}) in {video_path}"
+    if expected_duration > 0 and duration < expected_duration - 1.0:
+        return False, f"Duration {duration:.2f}s shorter than expected {expected_duration:.2f}s in {video_path}"
+    return True, f"OK ({size} bytes, {info.get('width')}x{info.get('height')}, {duration:.2f}s)"
+
+
 async def _async_execute_stages_1_to_3(job_id: str):
     """Executes Stages 1 to 3 and checks for Step-by-Step halt."""
     from core.script_engine.script_generator import ScriptGenerator
@@ -624,6 +661,8 @@ def _execute_stages_4_and_5(db, job_id: str):
     ffmpeg_available = bool(shutil.which("ffmpeg"))
 
     rendered = False
+    synthetic = False
+    last_ffmpeg_error = ""
     if ffmpeg_available:
         try:
             logger.info("FFmpeg detected, executing scene clip rendering...")
@@ -632,6 +671,7 @@ def _execute_stages_4_and_5(db, job_id: str):
                 logger.info(f"Rendering clip {i}...")
                 res = subprocess.run(cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
                 if res.returncode != 0:
+                    last_ffmpeg_error = (res.stderr or b"").decode("utf-8", errors="replace")[-2000:]
                     logger.warning(f"Native FFmpeg command with ass filter failed for clip {i}, attempting fallback clip encoding...")
                     img_p = Path(scenes[i].get("image_path", "")).resolve().as_posix()
                     audio_p = Path(scenes[i].get("audio_path", "")).resolve().as_posix()
@@ -640,6 +680,7 @@ def _execute_stages_4_and_5(db, job_id: str):
                     fallback_clip_cmd = f'ffmpeg -y -loop 1 -i "{img_p}" -i "{audio_p}" -t {dur:.2f} -vf "scale=1080:1920:force_original_aspect_ratio=increase,crop=1080:1920" -c:v libx264 -pix_fmt yuv420p -c:a aac -shortest "{clip_p}"'
                     res2 = subprocess.run(fallback_clip_cmd, shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
                     if res2.returncode != 0:
+                        last_ffmpeg_error = (res2.stderr or b"").decode("utf-8", errors="replace")[-2000:]
                         clips_rendered = False
                         break
 
@@ -649,12 +690,42 @@ def _execute_stages_4_and_5(db, job_id: str):
                 if res_concat.returncode == 0 and final_video_file.exists() and final_video_file.stat().st_size > 0:
                     rendered = True
                     logger.success(f"Final video successfully generated at: {final_video_file}")
+                else:
+                    last_ffmpeg_error = (res_concat.stderr or b"").decode("utf-8", errors="replace")[-2000:]
         except Exception as e_render:
-            logger.warning(f"Error during FFmpeg execution ({e_render}), engaging synthetic MP4 fallback")
+            logger.warning(f"Error during FFmpeg execution ({e_render})")
+            last_ffmpeg_error = str(e_render)
+    else:
+        last_ffmpeg_error = "ffmpeg binary not found on PATH"
 
     if not rendered:
-        logger.info(f"Generating synthetic MP4 for test environment at {final_video_file}")
-        _generate_synthetic_mp4(str(final_video_file), scenes=scenes)
+        if _allow_synthetic_video():
+            logger.warning(f"ALLOW_SYNTHETIC_VIDEO=1: generating synthetic MP4 for test environment at {final_video_file}")
+            _generate_synthetic_mp4(str(final_video_file), scenes=scenes)
+            synthetic = True
+            pipeline_data["synthetic"] = True
+        else:
+            error_msg = (
+                f"Render failed for job {job_id}: FFmpeg could not produce a valid video. "
+                f"Last FFmpeg error: {last_ffmpeg_error or 'unknown error'}"
+            )
+            logger.error(error_msg)
+            pipeline_data["error"] = error_msg
+            update_job_stage(db, job_id, "failed", status=JobStatus.failed, pipeline_data=pipeline_data, error=error_msg)
+            return
+
+    # Post-render verification with ffprobe: never mark done for an unverifiable file
+    if rendered and not synthetic:
+        expected_duration = sum(float(s.get("audio_duration") or s.get("duration") or 0.0) for s in scenes)
+        ok_verify, verify_detail = _verify_rendered_video(str(final_video_file), expected_duration=expected_duration)
+        pipeline_data["render_verification"] = verify_detail
+        if not ok_verify:
+            error_msg = f"Render verification failed for job {job_id}: {verify_detail}"
+            logger.error(error_msg)
+            pipeline_data["error"] = error_msg
+            update_job_stage(db, job_id, "failed", status=JobStatus.failed, pipeline_data=pipeline_data, error=error_msg)
+            return
+        logger.success(f"Render verification passed: {verify_detail}")
 
     # Snapshot extraction
     snapshot_file = job_dir / "snapshot.jpg"
