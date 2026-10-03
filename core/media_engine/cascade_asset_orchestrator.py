@@ -54,6 +54,11 @@ except ImportError:
     rembg = None
 
 from core.media_engine.asset_content_validator import AssetContentValidator, ValidationResult
+from core.media_engine.asset_provenance import (
+    provenance_from_cascade_metadata,
+    read_asset_meta,
+    write_asset_meta,
+)
 from core.media_engine.procedural_asset_synthesizer import ProceduralAssetSynthesizer
 from core.config import get_gemini_model
 
@@ -220,7 +225,8 @@ class CascadeAssetOrchestrator:
                             "tier_used": "cache",
                             "source": "cache",
                             "confidence": 1.0,
-                            "is_aligned": True
+                            "is_aligned": True,
+                            "asset_meta": read_asset_meta(cand_path)
                         })
 
         # 2. Token match pass
@@ -249,7 +255,8 @@ class CascadeAssetOrchestrator:
                                 "tier_used": "cache",
                                 "source": "cache",
                                 "confidence": 1.0,
-                                "is_aligned": True
+                                "is_aligned": True,
+                                "asset_meta": read_asset_meta(cand_file)
                             })
             except Exception as e:
                 logger.warning(f"Error scanning cache dir {s_dir}: {e}")
@@ -531,6 +538,11 @@ Trả về DUY NHẤT một chuỗi JSON hợp lệ (không markdown block):
             try:
                 img = await asyncio.wait_for(asyncio.to_thread(_fetch_curated), timeout=self.tier3_timeout)
                 if img is not None:
+                    # Gắn dấu provenance để Step 6 ghi sidecar đúng nguồn
+                    img.info["provenance_url"] = curated_url
+                    img.info["provenance_provider"] = (
+                        "unsplash" if "unsplash" in curated_url else "wikimedia"
+                    )
                     return img
             except Exception as e:
                 logger.warning(f"Tier 3 curated fetch error: {e}")
@@ -564,7 +576,10 @@ Trả về DUY NHẤT một chuỗi JSON hợp lệ (không markdown block):
                 if img_url and ("image/jpeg" in mime or "image/png" in mime):
                     img_resp = requests.get(img_url, headers=headers, timeout=self.tier3_timeout)
                     if img_resp.status_code == 200 and len(img_resp.content) > 3000:
-                        return Image.open(io.BytesIO(img_resp.content)).convert("RGB")
+                        wik_img = Image.open(io.BytesIO(img_resp.content)).convert("RGB")
+                        wik_img.info["provenance_url"] = img_url
+                        wik_img.info["provenance_provider"] = "wikimedia"
+                        return wik_img
             return None
 
         try:
@@ -789,6 +804,19 @@ Trả về DUY NHẤT một chuỗi JSON hợp lệ (không markdown block):
                 metadata["tier_used"] = "tier4_procedural"
                 metadata["source"] = "procedural_asset_synthesizer"
 
+        # Task 5.3: ghi sidecar provenance <asset>.meta.json cạnh asset,
+        # dùng metadata CUỐI CÙNG (đã tính cả fallback procedural ở trên).
+        _img_info = getattr(candidate_img, "info", {}) or {}
+        metadata["asset_meta"] = write_asset_meta(
+            final_path,
+            **provenance_from_cascade_metadata(
+                metadata,
+                prompt=metadata.get("prompt"),
+                provenance_url=_img_info.get("provenance_url"),
+                provenance_provider=_img_info.get("provenance_provider"),
+            ),
+        )
+
         logger.info(f"✅ [Cascade Complete] Successfully acquired '{target_object}' -> {final_path.name} (Tier: {metadata.get('tier_used')})")
         return str(final_path.resolve()), metadata
 
@@ -850,7 +878,8 @@ Trả về DUY NHẤT một chuỗi JSON hợp lệ (không markdown block):
                     "source": "imagen-3.0-generate-002",
                     "confidence": confidence,
                     "is_aligned": True,
-                    "reason": gate_res.get("reason", "")
+                    "reason": gate_res.get("reason", ""),
+                    "prompt": vintage_prompt
                 }
                 return await self._post_process_and_validate(
                     candidate_img=tier1_img,
@@ -879,7 +908,8 @@ Trả về DUY NHẤT một chuỗi JSON hợp lệ (không markdown block):
                             "source": "imagen-3.0-generate-002",
                             "confidence": retry_conf,
                             "is_aligned": True,
-                            "reason": retry_gate.get("reason", "")
+                            "reason": retry_gate.get("reason", ""),
+                            "prompt": refined_prompt
                         }
                         return await self._post_process_and_validate(
                             candidate_img=retry_img,
@@ -910,7 +940,8 @@ Trả về DUY NHẤT một chuỗi JSON hợp lệ (không markdown block):
                     "source": "pollinations_flux",
                     "confidence": confidence,
                     "is_aligned": True,
-                    "reason": gate_res.get("reason", "")
+                    "reason": gate_res.get("reason", ""),
+                    "prompt": vintage_prompt
                 }
                 return await self._post_process_and_validate(
                     candidate_img=tier2_img,
@@ -943,7 +974,8 @@ Trả về DUY NHẤT một chuỗi JSON hợp lệ (không markdown block):
                     "source": "curated_or_wikimedia",
                     "confidence": confidence,
                     "is_aligned": True,
-                    "reason": gate_res.get("reason", "")
+                    "reason": gate_res.get("reason", ""),
+                    "prompt": target_object
                 }
                 return await self._post_process_and_validate(
                     candidate_img=tier3_img,
@@ -972,7 +1004,8 @@ Trả về DUY NHẤT một chuỗi JSON hợp lệ (không markdown block):
             "source": "procedural_asset_synthesizer",
             "confidence": 1.0,
             "is_aligned": True,
-            "reason": "100% offline procedural asset synthesis"
+            "reason": "100% offline procedural asset synthesis",
+            "prompt": None
         }
         return await self._post_process_and_validate(
             candidate_img=tier4_img,

@@ -746,6 +746,32 @@ with tab_storyboard:
                 badge_str = tier_badges.get(tier, f"🏷️ {tier}")
                 st.markdown(f"**Phân tầng:** `{badge_str}`")
 
+                # Task 5.3: badge nguồn gốc asset (provenance) cạnh badge Tier
+                _src_badges = {
+                    "imagen": "🤖 Nguồn: Imagen 3 (AI)",
+                    "flux": "🤖 Nguồn: FLUX (AI)",
+                    "pexels": "📸 Nguồn: Pexels",
+                    "pixabay": "📸 Nguồn: Pixabay",
+                    "wikimedia": "📸 Nguồn: Wikimedia Commons",
+                    "unsplash": "📸 Nguồn: Unsplash",
+                    "procedural": "🎨 Nguồn: Procedural (vẽ bằng code)",
+                    "user_upload": "📤 Nguồn: Ảnh người dùng tải lên",
+                    "template": "🗂️ Nguồn: Template trong repo",
+                }
+                _asset_meta = sc.get("asset_meta") or {}
+                _src = _asset_meta.get("source")
+                if _src:
+                    _src_label = _src_badges.get(_src, f"🔎 Nguồn: {_src}")
+                    _lic = _asset_meta.get("license") or ""
+                    _url = _asset_meta.get("source_url") or ""
+                    st.markdown(f"**Nguồn asset:** `{_src_label}`")
+                    if _lic:
+                        st.caption(f"📄 License: {_lic}")
+                    if _url:
+                        st.caption(f"🔗 {_url}")
+                elif tier in ("tier2_stock", "tier3_stock"):
+                    st.markdown("**Nguồn asset:** `📸 Stock (chưa có provenance)`")
+
                 score = sc.get("vision_gate_score")
                 if score is not None:
                     try:

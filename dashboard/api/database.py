@@ -224,11 +224,25 @@ def update_scene_image(
     p_data = job.pipeline_data or {}
     storyboard = p_data.setdefault("storyboard", [])
     
+    # Task 5.3: ảnh do người dùng tải lên luôn mang provenance user_upload
+    _upload_meta = None
+    try:
+        from core.media_engine.asset_provenance import build_asset_meta, read_asset_meta
+
+        _upload_meta = read_asset_meta(new_image_path) or build_asset_meta(
+            source="user_upload",
+            license="User-provided upload (rights belong to the uploader)",
+        )
+    except Exception:
+        _upload_meta = None
+
     found = False
     for scene in storyboard:
         if scene.get("scene_index") == scene_index:
             scene["image_path"] = new_image_path
             scene["tier_used"] = "user_uploaded"
+            if _upload_meta:
+                scene["asset_meta"] = _upload_meta
             if vision_gate_score is not None:
                 scene["vision_gate_score"] = vision_gate_score
             if vision_gate_reasoning is not None:
@@ -241,6 +255,7 @@ def update_scene_image(
             "scene_index": scene_index,
             "image_path": new_image_path,
             "tier_used": "user_uploaded",
+            "asset_meta": _upload_meta,
             "vision_gate_score": vision_gate_score if vision_gate_score is not None else 1.0,
             "vision_gate_reasoning": vision_gate_reasoning or "User uploaded image"
         })

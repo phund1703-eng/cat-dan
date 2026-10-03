@@ -8,7 +8,12 @@ from loguru import logger
 from tqdm import tqdm
 from dotenv import load_dotenv
 
+from core.media_engine.asset_provenance import write_asset_meta
+
 load_dotenv()
+
+PEXELS_LICENSE = "Pexels License (free to use, attribution appreciated): https://www.pexels.com/license/"
+
 
 class PexelsClient:
     """Client for Pexels API."""
@@ -40,6 +45,7 @@ class PexelsClient:
                 videos.append({
                     "id": item.get("id"),
                     "url": item.get("url"),
+                    "author": item.get("user", {}).get("name"),
                     "duration": item.get("duration"),
                     "width": item.get("width"),
                     "height": item.get("height"),
@@ -56,7 +62,15 @@ class PexelsClient:
         url = video_info.get("download_url")
         if not url:
             raise ValueError("No download URL provided in video_info")
-        return self._download_file(url, output_path)
+        saved = self._download_file(url, output_path)
+        write_asset_meta(
+            saved,
+            source="pexels",
+            source_url=video_info.get("url"),
+            author=video_info.get("author"),
+            license=PEXELS_LICENSE,
+        )
+        return saved
 
     def search_images(self, query: str, per_page: int = 10, orientation: str = 'landscape') -> list[dict]:
         """Search for images on Pexels."""
@@ -71,6 +85,7 @@ class PexelsClient:
                 images.append({
                     "id": item.get("id"),
                     "url": item.get("url"),
+                    "author": item.get("photographer"),
                     "width": item.get("width"),
                     "height": item.get("height"),
                     "thumbnail_url": item.get("src", {}).get("medium"),
@@ -86,7 +101,15 @@ class PexelsClient:
         url = image_info.get("download_url")
         if not url:
             raise ValueError("No download URL provided in image_info")
-        return self._download_file(url, output_path)
+        saved = self._download_file(url, output_path)
+        write_asset_meta(
+            saved,
+            source="pexels",
+            source_url=image_info.get("url"),
+            author=image_info.get("author"),
+            license=PEXELS_LICENSE,
+        )
+        return saved
 
     def _download_file(self, url: str, output_path: str) -> str:
         try:

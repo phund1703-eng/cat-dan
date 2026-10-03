@@ -40,6 +40,11 @@ from dashboard.api.database import (
     update_job_output,
     update_scene_image
 )
+from core.media_engine.asset_provenance import (
+    copy_asset_meta as _copy_asset_meta,
+    read_asset_meta as _read_asset_meta,
+    write_asset_meta as _write_asset_meta,
+)
 from dashboard.api.routes.channels import (
     compute_next_publish_slot,
     get_channel_config,
@@ -823,6 +828,7 @@ async def step_generate_storyboard(
         tier_used = "tier1_imagen"
         gate_score = 0.92
         gate_reason = "High visual relevance and aesthetic alignment"
+        asset_meta = None
 
         try:
             acq_path, meta = await cascade.acquire_asset(
@@ -836,6 +842,7 @@ async def step_generate_storyboard(
                 tier_used = meta.get("tier_used", "tier1_imagen")
                 gate_score = float(meta.get("confidence", 0.92))
                 gate_reason = meta.get("reason", "Asset acquired via cascade")
+                asset_meta = meta.get("asset_meta") or _copy_asset_meta(acq_path, dest_img)
         except Exception as e_casc:
             logger.warning(f"Cascade acquisition failed for scene {scene_idx} ({e_casc}), fallback to ImageGenerator")
             try:
@@ -850,6 +857,8 @@ async def step_generate_storyboard(
                 tier_used = "tier4_procedural"
                 gate_score = 0.85
                 gate_reason = "Procedural artistic collage"
+            if not asset_meta:
+                asset_meta = _read_asset_meta(dest_img)
 
         try:
             if dest_img.exists():
@@ -870,6 +879,8 @@ async def step_generate_storyboard(
         sc["tier_used"] = tier_used
         sc["vision_gate_score"] = gate_score
         sc["vision_gate_reasoning"] = gate_reason
+        if asset_meta:
+            sc["asset_meta"] = asset_meta
 
         storyboard.append({
             "scene_index": int(scene_idx),
@@ -878,7 +889,8 @@ async def step_generate_storyboard(
             "prompt": styled_prompt,
             "tier_used": tier_used,
             "vision_gate_score": gate_score,
-            "vision_gate_reasoning": gate_reason
+            "vision_gate_reasoning": gate_reason,
+            "asset_meta": asset_meta
         })
 
     p_data["storyboard"] = storyboard
@@ -1008,6 +1020,13 @@ async def _do_upload_scene_image(
     content = await file.read()
     with open(saved_filepath, "wb") as f:
         f.write(content)
+
+    # Task 5.3: provenance cho ảnh người dùng tự tải lên
+    _write_asset_meta(
+        saved_filepath,
+        source="user_upload",
+        license="User-provided upload (rights belong to the uploader)",
+    )
 
     db_job = update_scene_image(
         db=db,
@@ -1326,6 +1345,27 @@ def export_job_zip(job_id: str, db: Session = Depends(get_db)):
                 "pipeline_data": db_job.pipeline_data
             }
             zipf.writestr("project_info.json", json.dumps(summary, indent=2, ensure_ascii=False))
+
+        # Task 5.3: tổng hợp provenance asset (sidecar .meta.json trong thư
+        # mục job đã tự đi theo vòng walk ở trên; file này gom theo storyboard)
+        try:
+            _p_data = db_job.pipeline_data or {}
+            _prov = [
+                {
+                    "scene_index": sb.get("scene_index"),
+                    "image_path": sb.get("image_path"),
+                    "tier_used": sb.get("tier_used"),
+                    "provenance": sb.get("asset_meta"),
+                }
+                for sb in (_p_data.get("storyboard") or [])
+                if isinstance(sb, dict) and sb.get("asset_meta")
+            ]
+            zipf.writestr(
+                "asset_provenance.json",
+                json.dumps(_prov, ensure_ascii=False, indent=2),
+            )
+        except Exception as e_prov:
+            logger.warning(f"Could not attach asset_provenance.json to export zip for job {job_id}: {e_prov}")
 
         # Task 2.4: luôn đính kèm nguồn trích dẫn trong gói export
         try:

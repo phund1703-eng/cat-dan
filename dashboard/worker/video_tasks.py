@@ -48,6 +48,7 @@ from dashboard.api.database import (
 )
 from dashboard.api.models import JobStatus
 from publish.postiz_client.postiz_api import PostizClient
+from core.media_engine.asset_provenance import copy_asset_meta, read_asset_meta
 
 # NOTE (Task 4.1): Celery/Redis đã bị loại bỏ. Hàng đợi bền là tiến trình
 # worker riêng `python -m dashboard.worker.runner` poll DB; hai hàm
@@ -517,6 +518,7 @@ async def _async_execute_stages_2_and_3(job_id: str):
             gate_reason = "Offline visual verification pass"
 
             target_obj = scene.get("focal_keyword") or scene.get("secondary_keyword") or job.topic
+            asset_meta = None  # Task 5.3: provenance của asset scene này (nếu có)
             reuse_image = img_dest.exists() and img_dest.stat().st_size > 0
             if reuse_image:
                 # Resume sau khi worker bị tắt giữa chừng: ảnh đã có trên đĩa
@@ -528,6 +530,7 @@ async def _async_execute_stages_2_and_3(job_id: str):
                 except (TypeError, ValueError):
                     pass
                 gate_reason = scene.get("vision_gate_reasoning") or gate_reason
+                asset_meta = read_asset_meta(img_dest)
             else:
                 try:
                     acquired_path, meta = await cascade.acquire_asset(
@@ -541,6 +544,7 @@ async def _async_execute_stages_2_and_3(job_id: str):
                         tier_used = meta.get("tier_used", "tier1_imagen")
                         gate_score = float(meta.get("confidence", 0.90))
                         gate_reason = meta.get("reason", "Cascade asset acquisition verified")
+                        asset_meta = meta.get("asset_meta") or copy_asset_meta(acquired_path, img_dest)
                 except Exception as e_casc:
                     logger.warning(f"Cascade acquisition failed for scene {i} ({e_casc}), trying ImageGenerator")
                     try:
@@ -554,6 +558,7 @@ async def _async_execute_stages_2_and_3(job_id: str):
                         tier_used = "tier4_procedural"
                         gate_score = 0.85
                         gate_reason = "Procedural artistic collage fallback"
+                    asset_meta = read_asset_meta(img_dest)
 
             # Optional live Vision Gate evaluation (bỏ qua khi đang reuse
             # artifact lúc resume — không gọi mạng thừa, Task 4.1)
@@ -578,6 +583,8 @@ async def _async_execute_stages_2_and_3(job_id: str):
             scene["tier_used"] = tier_used
             scene["vision_gate_score"] = gate_score
             scene["vision_gate_reasoning"] = gate_reason
+            if asset_meta:
+                scene["asset_meta"] = asset_meta
 
             storyboard.append({
                 "scene_index": i,
@@ -586,7 +593,8 @@ async def _async_execute_stages_2_and_3(job_id: str):
                 "prompt": visual_prompt,
                 "tier_used": tier_used,
                 "vision_gate_score": gate_score,
-                "vision_gate_reasoning": gate_reason
+                "vision_gate_reasoning": gate_reason,
+                "asset_meta": asset_meta
             })
 
         pipeline_data["storyboard"] = storyboard
@@ -1183,9 +1191,10 @@ def regenerate_scene_asset(job_id: str, scene_index: int, prompt: str) -> dict:
         tier_used = "tier1_imagen"
         gate_score = 0.95
         gate_reason = "Regenerated prompt compliant"
+        asset_meta = None
 
         async def _do_regen():
-            nonlocal tier_used, gate_score, gate_reason
+            nonlocal tier_used, gate_score, gate_reason, asset_meta
             try:
                 acq_path, meta = await cascade.acquire_asset(
                     target_object=prompt[:30],
@@ -1198,6 +1207,7 @@ def regenerate_scene_asset(job_id: str, scene_index: int, prompt: str) -> dict:
                     tier_used = meta.get("tier_used", "tier1_imagen")
                     gate_score = float(meta.get("confidence", 0.95))
                     gate_reason = meta.get("reason", "Regenerated asset compliant")
+                    asset_meta = meta.get("asset_meta") or copy_asset_meta(acq_path, new_img_dest)
             except Exception as e_casc:
                 logger.warning(f"Cascade regeneration failed ({e_casc}), using ImageGenerator")
                 try:
@@ -1227,6 +1237,8 @@ def regenerate_scene_asset(job_id: str, scene_index: int, prompt: str) -> dict:
                 pass
 
         run_in_async_loop(_do_regen())
+        if not asset_meta:
+            asset_meta = read_asset_meta(new_img_dest)
 
         # Update scene in pipeline_data["scenes"]
         found_scene = False
@@ -1239,6 +1251,8 @@ def regenerate_scene_asset(job_id: str, scene_index: int, prompt: str) -> dict:
                 sc["tier_used"] = tier_used
                 sc["vision_gate_score"] = gate_score
                 sc["vision_gate_reasoning"] = gate_reason
+                if asset_meta:
+                    sc["asset_meta"] = asset_meta
                 found_scene = True
                 break
 
@@ -1265,6 +1279,8 @@ def regenerate_scene_asset(job_id: str, scene_index: int, prompt: str) -> dict:
                 sb["tier_used"] = tier_used
                 sb["vision_gate_score"] = gate_score
                 sb["vision_gate_reasoning"] = gate_reason
+                if asset_meta:
+                    sb["asset_meta"] = asset_meta
                 found_sb = True
                 break
 

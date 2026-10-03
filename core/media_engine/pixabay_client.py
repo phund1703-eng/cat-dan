@@ -8,7 +8,12 @@ from loguru import logger
 from tqdm import tqdm
 from dotenv import load_dotenv
 
+from core.media_engine.asset_provenance import write_asset_meta
+
 load_dotenv()
+
+PIXABAY_LICENSE = "Pixabay Content License: https://pixabay.com/service/license-summary/"
+
 
 class PixabayClient:
     """Client for Pixabay API."""
@@ -37,6 +42,7 @@ class PixabayClient:
                 videos.append({
                     "id": item.get("id"),
                     "url": item.get("pageURL"),
+                    "author": item.get("user"),
                     "duration": item.get("duration"),
                     "width": best_file.get("width"),
                     "height": best_file.get("height"),
@@ -53,7 +59,15 @@ class PixabayClient:
         url = video_info.get("download_url")
         if not url:
             raise ValueError("No download URL provided in video_info")
-        return self._download_file(url, output_path)
+        saved = self._download_file(url, output_path)
+        write_asset_meta(
+            saved,
+            source="pixabay",
+            source_url=video_info.get("url"),
+            author=video_info.get("author"),
+            license=PIXABAY_LICENSE,
+        )
+        return saved
 
     def search_images(self, query: str, per_page: int = 10) -> list[dict]:
         """Search for images on Pixabay."""
@@ -68,6 +82,7 @@ class PixabayClient:
                 images.append({
                     "id": item.get("id"),
                     "url": item.get("pageURL"),
+                    "author": item.get("user"),
                     "width": item.get("imageWidth"),
                     "height": item.get("imageHeight"),
                     "thumbnail_url": item.get("previewURL"),
@@ -83,7 +98,15 @@ class PixabayClient:
         url = image_info.get("download_url")
         if not url:
             raise ValueError("No download URL provided in image_info")
-        return self._download_file(url, output_path)
+        saved = self._download_file(url, output_path)
+        write_asset_meta(
+            saved,
+            source="pixabay",
+            source_url=image_info.get("url"),
+            author=image_info.get("author"),
+            license=PIXABAY_LICENSE,
+        )
+        return saved
 
     def _download_file(self, url: str, output_path: str) -> str:
         try:

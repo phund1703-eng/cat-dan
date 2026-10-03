@@ -18,6 +18,8 @@ from PIL import Image, ImageDraw, ImageFilter
 from loguru import logger
 from dotenv import load_dotenv
 
+from core.media_engine.asset_provenance import write_asset_meta
+
 load_dotenv()
 
 
@@ -68,6 +70,11 @@ class ImageGenerator:
             logger.info(f"✨ [Tầng 3] Dùng ảnh template có sẵn: {template_img}")
             import shutil
             shutil.copyfile(template_img, str(out_file))
+            write_asset_meta(
+                out_file,
+                source="template",
+                license="Repo-bundled template asset (assets/templates)",
+            )
             return str(out_file)
 
         # 2. Tầng 1: Google Imagen 3 (nếu có API key hợp lệ)
@@ -119,6 +126,13 @@ class ImageGenerator:
                 image_bytes = generated.image.image_bytes
                 with open(output_path, "wb") as f:
                     f.write(image_bytes)
+                write_asset_meta(
+                    output_path,
+                    source="imagen",
+                    author="Google Imagen 3 (imagen-3.0-generate-002)",
+                    license="AI-generated content",
+                    prompt=prompt_text,
+                )
                 return True
         except Exception as e:
             logger.warning(f"Lỗi Imagen 3 với key #{self.current_key_idx + 1}: {e}")
@@ -177,6 +191,16 @@ class ImageGenerator:
                         top = (img.height - min_dim) // 2
                         cropped = img.crop((left, top, left + min_dim, top + min_dim))
                         cropped.resize((800, 800), Image.Resampling.LANCZOS).save(output_path, format="PNG")
+                        _is_unsplash = "unsplash" in target_url
+                        write_asset_meta(
+                            output_path,
+                            source="unsplash" if _is_unsplash else "wikimedia",
+                            source_url=target_url,
+                            license=(
+                                "Unsplash License" if _is_unsplash
+                                else "Wikimedia Commons (see source file page for exact license)"
+                            ),
+                        )
                         logger.success(f"✅ Đã tải ảnh minh họa thực tế thành công: {output_path}")
                         return output_path
             except Exception as e:
@@ -275,3 +299,10 @@ class ImageGenerator:
             draw.arc([w//2 - 110, h//2 - 80, w//2 + 110, h//2 + 70], start=200, end=340, fill=(255, 255, 255, 255), width=10)
 
         img.save(output_path, format="PNG")
+        write_asset_meta(
+            output_path,
+            source="procedural",
+            author="AutoVideoFactory ImageGenerator (Pillow artistic collage)",
+            license="Generated in-repo (project LICENSE)",
+            prompt=(scene or {}).get("narration"),
+        )
