@@ -27,7 +27,7 @@ import shutil
 import asyncio
 import tempfile
 import subprocess
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple, Union
 
@@ -43,6 +43,7 @@ from dashboard.api.database import (
     update_scene_image
 )
 from dashboard.api.models import JobStatus
+from publish.postiz_client.postiz_api import PostizClient
 
 # Safe Celery app import for backward compatibility
 try:
@@ -1114,16 +1115,203 @@ def create_video_task(self, job_id: str):
     return run_video_pipeline(job_id)
 
 
-@app.task(name="dashboard.worker.video_tasks.publish_video_task")
-def publish_video_task(job_id: str, platforms: list, schedule_time: str = None):
-    """Publishes completed video to social media platforms."""
+def _parse_schedule_time(schedule_time: Union[str, datetime, None]) -> Optional[datetime]:
+    """Parse an ISO schedule value without silently discarding timezone data."""
+    if schedule_time is None or isinstance(schedule_time, datetime):
+        return schedule_time
+    value = str(schedule_time).strip()
+    if not value:
+        return None
+    if value.endswith("Z"):
+        value = value[:-1] + "+00:00"
+    return datetime.fromisoformat(value)
+
+
+def _extract_postiz_post_id(result: Any) -> Optional[str]:
+    """Extract a Postiz post identifier from the documented dict response."""
+    if isinstance(result, dict):
+        for key in ("id", "post_id", "postId"):
+            if result.get(key):
+                return str(result[key])
+        for key in ("data", "post", "result"):
+            nested = _extract_postiz_post_id(result.get(key))
+            if nested:
+                return nested
+    if isinstance(result, list) and result:
+        return _extract_postiz_post_id(result[0])
+    return None
+
+
+def _publish_metadata(job, pipeline_data: Dict[str, Any]) -> Dict[str, Any]:
+    """Resolve publish metadata from pipeline data, DB metadata, then script."""
+    metadata: Dict[str, Any] = {}
+    if isinstance(pipeline_data.get("metadata"), dict):
+        metadata.update(pipeline_data["metadata"])
+    db_metadata = getattr(job, "extra_metadata", None)
+    if isinstance(db_metadata, dict):
+        # Explicitly stored DB metadata is newer than pipeline bootstrap data.
+        metadata.update(db_metadata)
+
+    script = pipeline_data.get("script")
+    if not isinstance(script, dict):
+        script = getattr(job, "script", None) or {}
+    if not isinstance(script, dict):
+        script = {}
+
+    hashtags = metadata.get("hashtags") or script.get("hashtags") or []
+    if isinstance(hashtags, str):
+        hashtags = [tag.strip() for tag in hashtags.split(",") if tag.strip()]
+
+    return {
+        "title": metadata.get("title") or script.get("title") or job.topic,
+        "description": metadata.get("description") or script.get("description") or "",
+        "hashtags": [str(tag) for tag in hashtags],
+        "thumbnail_text": metadata.get("thumbnail_text") or "",
+        "script": script,
+    }
+
+
+def _record_publish_state(
+    db,
+    job_id: str,
+    publish: Dict[str, Any],
+    *,
+    status: Optional[JobStatus] = None,
+    stage: Optional[str] = None,
+    error: Optional[str] = None,
+) -> Optional[Any]:
+    """Persist publish audit data without changing the rendered-video fields."""
+    job = get_job(db, job_id)
+    if not job:
+        return None
+    pipeline_data = job.pipeline_data or {}
+    pipeline_data["publish"] = publish
+    job.pipeline_data = pipeline_data
+    if status is not None:
+        job.status = status
+    if stage is not None:
+        job.stage = stage
+    if error is not None:
+        job.error = error
+    job.updated_at = datetime.utcnow()
+    db.commit()
+    db.refresh(job)
+    return job
+
+
+def publish_video(job_id: str, platforms: list, schedule_time: Union[str, datetime, None] = None) -> Dict[str, Any]:
+    """
+    Publish a completed video through Postiz.
+
+    A job is marked ``published`` only when Postiz returns a post id. Any
+    Postiz/media failure is recorded as the distinct ``publish_failed`` status;
+    the master-video stage and ``output_path`` are left intact.
+    """
     db = SessionLocal()
     try:
-        logger.info(f"Publishing job {job_id} to platforms: {platforms}")
-        update_job_status(db, job_id, JobStatus.published)
-        logger.success(f"Job {job_id} marked as published successfully")
+        job = get_job(db, job_id)
+        if not job:
+            raise ValueError(f"Job {job_id} not found in DB")
+
+        pipeline_data = job.pipeline_data or {}
+        previous_publish = pipeline_data.get("publish") if isinstance(pipeline_data.get("publish"), dict) else {}
+        metadata = _publish_metadata(job, pipeline_data)
+        requested_platforms = [str(p) for p in (platforms or [])]
+        parsed_schedule = _parse_schedule_time(schedule_time)
+        scheduled_at = parsed_schedule.isoformat() if parsed_schedule else previous_publish.get("scheduled_at")
+
+        video_path = job.output_path or str(Path("data/output") / job_id / "final_video.mp4")
+        publish_info: Dict[str, Any] = {
+            **previous_publish,
+            "postiz_post_id": previous_publish.get("postiz_post_id"),
+            "platforms": requested_platforms,
+            "scheduled_at": scheduled_at,
+            "status": "publishing",
+            "title": metadata["title"],
+        }
+        _record_publish_state(db, job_id, publish_info)
+
+        # The job object held by this session is stale after the helper commit;
+        # re-read fields before constructing the client call.
+        job = get_job(db, job_id)
+        pipeline_data = job.pipeline_data or {}
+        thumbnail_path = pipeline_data.get("thumbnail_path") or str(Path("data/output") / job_id / "thumbnail.jpg")
+        if not Path(thumbnail_path).exists():
+            thumbnail_path = None
+
+        if not video_path or not Path(video_path).exists():
+            raise FileNotFoundError(f"Completed video file not found: {video_path}")
+
+        logger.info(f"Publishing job {job_id} to platforms: {requested_platforms} via Postiz")
+        client = PostizClient()
+        result = run_in_async_loop(
+            client.schedule_post(
+                video_path=str(video_path),
+                title=metadata["title"],
+                description=metadata["description"],
+                hashtags=metadata["hashtags"],
+                platforms=requested_platforms,
+                schedule_time=parsed_schedule,
+                thumbnail_path=thumbnail_path,
+            )
+        )
+        post_id = _extract_postiz_post_id(result)
+        if not post_id:
+            raise RuntimeError(f"Postiz response did not include a post id: {result!r}")
+
+        is_future_schedule = bool(parsed_schedule and parsed_schedule > datetime.now(parsed_schedule.tzinfo or timezone.utc))
+        publish_info.update({
+            "postiz_post_id": post_id,
+            "status": "scheduled" if is_future_schedule else "published",
+            "postiz_response": result if isinstance(result, (dict, list, str, int, float, bool)) else str(result),
+            "published_at": datetime.now(timezone.utc).isoformat(),
+            "error": None,
+        })
+        _record_publish_state(
+            db,
+            job_id,
+            publish_info,
+            status=JobStatus.published,
+            stage="published",
+            error=None,
+        )
+        logger.success(f"Job {job_id} published via Postiz (post_id={post_id})")
+        return {"status": "published", "job_id": job_id, "postiz_post_id": post_id, "publish": publish_info}
+
     except Exception as e:
         logger.exception(f"Error publishing job {job_id}: {e}")
-        update_job_status(db, job_id, JobStatus.failed, error=f"Publish error: {str(e)}")
+        try:
+            job = get_job(db, job_id)
+            if job:
+                pipeline_data = job.pipeline_data or {}
+                previous_publish = pipeline_data.get("publish") if isinstance(pipeline_data.get("publish"), dict) else {}
+                publish_info = {
+                    **previous_publish,
+                    "platforms": [str(p) for p in (platforms or [])],
+                    "scheduled_at": previous_publish.get("scheduled_at"),
+                    "status": "publish_failed",
+                    "error": str(e),
+                    "error_type": type(e).__name__,
+                }
+                # Stage returns to done to make clear the rendered master is
+                # still intact; job.status carries the distinct failure state.
+                _record_publish_state(
+                    db,
+                    job_id,
+                    publish_info,
+                    status=JobStatus.publish_failed,
+                    stage="done",
+                    error=f"Publish error: {str(e)}",
+                )
+                return {"status": "publish_failed", "job_id": job_id, "error": str(e), "publish": publish_info}
+        except Exception:
+            logger.exception(f"Could not persist publish_failed state for job {job_id}")
+        return {"status": "publish_failed", "job_id": job_id, "error": str(e)}
     finally:
         db.close()
+
+
+@app.task(name="dashboard.worker.video_tasks.publish_video_task")
+def publish_video_task(job_id: str, platforms: list, schedule_time: str = None):
+    """Celery-compatible adapter delegating to the native Postiz publisher."""
+    return publish_video(job_id, platforms, schedule_time)

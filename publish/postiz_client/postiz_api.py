@@ -4,6 +4,7 @@ Tích hợp với Postiz (self-hosted) để đăng video lên các nền tảng
 """
 
 import os
+import mimetypes
 import httpx
 import asyncio
 from pathlib import Path
@@ -106,10 +107,11 @@ class PostizClient:
     async def _upload_media(self, file_path: str) -> dict:
         """Upload media file lên Postiz"""
         file_path = Path(file_path)
-        
+        mime_type = mimetypes.guess_type(file_path.name)[0] or "application/octet-stream"
+
         async with httpx.AsyncClient() as client:
             with open(file_path, "rb") as f:
-                files = {"file": (file_path.name, f, "video/mp4")}
+                files = {"file": (file_path.name, f, mime_type)}
                 response = await client.post(
                     f"{self.base_url}/api/media",
                     headers={"Authorization": f"Bearer {self.api_key}"},

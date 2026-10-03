@@ -172,20 +172,17 @@ def _execute_continue_source_review(job_id: str):
 
 
 def _execute_publish(job_id: str, platforms: list, schedule_time: Optional[str] = None):
-    """Executes publish task in background without Celery."""
+    """Executes the native Postiz publisher in the background without Celery."""
     try:
-        from dashboard.worker.video_tasks import publish_video_task
-        if hasattr(publish_video_task, "run"):
-            publish_video_task.run(job_id, platforms, schedule_time)
-        else:
-            publish_video_task(job_id, platforms, schedule_time)
+        from dashboard.worker.video_tasks import publish_video
+        result = publish_video(job_id, platforms, schedule_time)
+        logger.info(f"publish_video({job_id}) -> {result.get('status')}")
+        return result
     except Exception as e:
-        logger.exception(f"Error publishing job {job_id}: {e}")
-        db = SessionLocal()
-        try:
-            update_job_status(db, job_id, JobStatus.failed, error=f"Publish error: {str(e)}")
-        finally:
-            db.close()
+        # publish_video owns publish_failed persistence so a publish problem
+        # never overwrites the render pipeline's generic `failed` state here.
+        logger.exception(f"Error invoking publisher for job {job_id}: {e}")
+        return {"status": "publish_failed", "job_id": job_id, "error": str(e)}
 
 def _fallback_run_video_pipeline(job_id: str):
     """Fallback pipeline when worker is not yet upgraded to realistic pipeline."""

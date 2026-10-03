@@ -25,7 +25,9 @@ class JobStatus(str, Enum):
     done = "done"
     failed = "failed"
     approved = "approved"
+    scheduled = "scheduled"
     published = "published"
+    publish_failed = "publish_failed"
     rejected = "rejected"
 
 class SourceRef(BaseModel):
