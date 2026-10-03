@@ -28,6 +28,25 @@ class JobStatus(str, Enum):
     published = "published"
     rejected = "rejected"
 
+class SourceRef(BaseModel):
+    """One citation attached to a scene (Task 2.1 schema)."""
+    title: str = ""
+    url: str
+    publisher: str = ""
+    accessed_date: str = ""  # YYYY-MM-DD
+
+    @field_validator("url")
+    @classmethod
+    def validate_source_url(cls, v: str) -> str:
+        v = (v or "").strip()
+        if not v.startswith(("http://", "https://")):
+            raise ValueError("source url must start with http:// or https://")
+        host = v.split("://", 1)[-1].split("/")[0].split(":")[0]
+        if "." not in host or host in ("localhost",):
+            raise ValueError("source url must contain a real domain (e.g. who.int)")
+        return v
+
+
 class CreateJobRequest(BaseModel):
     topic: str
     style: VideoStyle

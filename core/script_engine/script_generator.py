@@ -5,6 +5,7 @@ from typing import Dict, Any
 from loguru import logger
 from dotenv import load_dotenv
 from .gemini_client import GeminiClient
+from .scene_schema import normalize_script_scenes
 
 load_dotenv()
 
@@ -36,6 +37,7 @@ class ScriptGenerator:
         if not self.client.api_keys:
             logger.warning("No valid Gemini API key found. Using high-quality collage template script...")
             script = self._generate_fallback_script(topic, style, language, duration)
+            normalize_script_scenes(script)
             job_id = str(uuid.uuid4())[:8]
             script["job_id"] = job_id
             self._save_script(script, job_id)
@@ -52,7 +54,8 @@ class ScriptGenerator:
         except Exception as e_gemini:
             logger.warning(f"ScriptGenerator: Gemini API unavailable or quota limit reached ({e_gemini}). Using dynamic topic-aware fallback script...")
             script = self._generate_fallback_script(topic, style, language, duration)
-        
+
+        normalize_script_scenes(script)
         job_id = str(uuid.uuid4())[:8]
         script["job_id"] = job_id
         script["estimated_duration"] = self.estimate_duration(script)
@@ -423,6 +426,8 @@ class ScriptGenerator:
         for s in scenes_data:
             scene_dict = {
                 "narration": s["narration"],
+                "fact": s.get("fact") or s["core_meaning"],
+                "sources": s.get("sources") or [],
                 "core_meaning": s["core_meaning"],
                 "visual_metaphor": s["visual_metaphor"],
                 "topic_domain": domain,

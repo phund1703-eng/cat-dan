@@ -123,7 +123,8 @@ class GeminiClient:
         Calls gen_model.generate_content via asyncio.to_thread to prevent gRPC loop conflicts on Windows.
         """
         from .prompt_templates import PromptTemplates
-        
+        from .scene_schema import normalize_script_scenes
+
         prompt = PromptTemplates.get_script_prompt(topic, style, language, duration)
         candidate_models = self._get_candidate_models(model)
         
@@ -151,7 +152,7 @@ class GeminiClient:
                     try:
                         result = json.loads(response.text)
                         logger.success(f"Successfully generated script for topic '{topic}' using model '{candidate_model}'")
-                        return result
+                        return normalize_script_scenes(result)
                     except (json.JSONDecodeError, AttributeError) as e:
                         logger.warning(
                             f"Failed to parse JSON from Gemini response using model '{candidate_model}': {e}. "
@@ -164,7 +165,7 @@ class GeminiClient:
                             try:
                                 result = json.loads(match.group(1).strip())
                                 logger.success(f"Successfully extracted JSON from markdown block using model '{candidate_model}'")
-                                return result
+                                return normalize_script_scenes(result)
                             except Exception:
                                 pass
                         raise ValueError(f"Could not parse valid JSON from response: {raw_text[:200]}")

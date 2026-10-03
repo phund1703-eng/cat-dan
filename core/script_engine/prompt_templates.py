@@ -54,6 +54,11 @@ QUY TẮC BẮT BUỘC CHO TỪNG CẢNH (SCENE):
 5. Gate 2 (Prompt sinh ảnh tĩnh hoàn chỉnh):
    Sử dụng chính xác mẫu chuyên gia:
    "Use case: ads-marketing. Asset type: final still frame for a 9:16 image-to-video B-roll clip. Primary request: Create a finished editorial paper-collage image expressing [visual_metaphor]. Scene/backdrop: perfectly flat [color_field] paper field #[color_hex] with subtle uncoated paper fiber. Style/medium: premium editorial stop-motion paper collage; black-and-white halftone photographic cut-outs mixed with selective colored cardstock. Composition/framing: vertical 9:16 locked poster frame; central subject within the middle 70 percent; generous clean color-field negative space; 3–6 large separable paper groups for later assemble-from-empty animation. Materials/textures: visible printed halftone dots, crisp machine-cut edges, thin warm-cream paper keylines, soft low-opacity physical drop shadows. Avoid: no typography, no readable letters, no numerals, no logos, no watermark, no UI, no subtitles, no glossy 3D, no photoreal environment, no clutter."
+6. QUY TẮC NGUỒN TRÍCH DẪN (BẮT BUỘC):
+   - Mỗi cảnh phải có trường "fact": một câu khẳng định khoa học cốt lõi mà lời thoại của cảnh dựa vào.
+   - Nếu cảnh chứa con số, năm, tỉ lệ, đơn vị đo hoặc khẳng định khoa học cụ thể, trường "sources" PHẢI có tối thiểu 1 nguồn dạng {{"title", "url", "publisher", "accessed_date"}}.
+   - CHỈ ghi URL có thật mà bạn chắc chắn tồn tại của tổ chức uy tín (WHO, NASA, NOAA, Britannica, PubMed, Wikipedia, cơ quan nhà nước, trường đại học...). TUYỆT ĐỐI KHÔNG bịa URL: nếu không chắc chắn về một URL cụ thể, hãy để "sources": [] trống — hệ thống sẽ yêu cầu bổ sung sau.
+   - Cảnh thuần định tính (không số liệu, không khẳng định khoa học) được phép để "sources": [].
 
 YÊU CẦU ĐẦU RA:
 Bạn phải trả về DUY NHẤT một chuỗi JSON hợp lệ với cấu trúc sau:
@@ -65,6 +70,8 @@ Bạn phải trả về DUY NHẤT một chuỗi JSON hợp lệ với cấu tr�
   "scenes": [
     {{
       "narration": "Lời thoại nhân vật hoặc giọng đọc súc tích, hấp dẫn bằng tiếng Việt.",
+      "fact": "Khẳng định khoa học cốt lõi của cảnh (một câu ngắn).",
+      "sources": [{{"title": "Tiêu đề nguồn", "url": "https://...", "publisher": "Tổ chức xuất bản", "accessed_date": "YYYY-MM-DD"}}],
       "core_meaning": "Ý nghĩa cốt lõi của cảnh",
       "visual_metaphor": "3-6 đồ vật biểu tượng cụ thể hữu hình",
       "topic_domain": "biology",
@@ -97,6 +104,11 @@ MANDATORY RULES FOR EACH SCENE:
 4. Contextual flags:
    - has_hand: bool (true only if human intervention/pointing/manipulation is depicted).
    - has_camera: bool (true only if observation or media perspective is depicted).
+5. SOURCE CITATION RULES (MANDATORY):
+   - Every scene must include a "fact" field: one short sentence stating the core scientific claim behind the narration.
+   - If a scene contains numbers, years, ratios, measurement units, or any specific scientific claim, its "sources" list MUST contain at least 1 entry: {{"title", "url", "publisher", "accessed_date"}}.
+   - ONLY provide URLs you are confident actually exist from reputable organizations (WHO, NASA, NOAA, Britannica, PubMed, Wikipedia, government agencies, universities...). NEVER invent a URL: if you are not sure of an exact URL, leave "sources": [] empty — the system will request it later.
+   - Purely qualitative scenes (no figures, no specific scientific claim) may leave "sources": [].
 
 OUTPUT REQUIREMENTS:
 Return ONLY a valid JSON string:
@@ -108,6 +120,8 @@ Return ONLY a valid JSON string:
   "scenes": [
     {{
       "narration": "Concise, punchy voiceover narration.",
+      "fact": "Core scientific claim of the scene (one short sentence).",
+      "sources": [{{"title": "Source title", "url": "https://...", "publisher": "Publisher", "accessed_date": "YYYY-MM-DD"}}],
       "core_meaning": "Core meaning",
       "visual_metaphor": "3-6 concrete objects metaphor",
       "topic_domain": "space",
@@ -141,6 +155,8 @@ Bạn phải trả về DUY NHẤT một chuỗi JSON hợp lệ với cấu tr�
   "scenes": [
     {{
       "narration": "Lời thoại nhân vật hoặc giọng đọc (voiceover). Phải tự nhiên, hấp dẫn, súc tích.",
+      "fact": "Khẳng định khoa học cốt lõi của cảnh (một câu ngắn).",
+      "sources": [{{"title": "Tiêu đề nguồn", "url": "https://...", "publisher": "Tổ chức xuất bản", "accessed_date": "YYYY-MM-DD"}}],
       "visual_description": "Mô tả hình ảnh trực quan của cảnh",
       "duration": 5.0
     }}
@@ -151,6 +167,7 @@ Lưu ý:
 - Tổng duration của tất cả các cảnh (scenes) nên xấp xỉ {duration} giây.
 - Đảm bảo đầu ra là JSON chuẩn.
 - Phải dùng tiếng Việt.
+- QUY TẮC NGUỒN: cảnh có con số/năm/đơn vị đo/khẳng định khoa học thì "sources" phải có tối thiểu 1 nguồn thật (WHO, NASA, Britannica, PubMed...). KHÔNG bịa URL — không chắc thì để "sources": [] trống.
 """
         else:
             return f"""You are a professional video scriptwriter. Write a video script about the topic: "{topic}".
@@ -166,6 +183,8 @@ You must return ONLY a valid JSON string with the following structure:
   "scenes": [
     {{
       "narration": "The spoken text (voiceover) for this scene. Should be natural, concise and engaging.",
+      "fact": "Core scientific claim of the scene (one short sentence).",
+      "sources": [{{"title": "Source title", "url": "https://...", "publisher": "Publisher", "accessed_date": "YYYY-MM-DD"}}],
       "visual_description": "Visual description of the scene",
       "duration": 5.0
     }}
@@ -176,4 +195,5 @@ Notes:
 - The sum of all scene durations should be approximately {duration} seconds.
 - Ensure the output is valid JSON.
 - Must be in English.
+- SOURCE RULE: scenes with numbers/years/units/scientific claims need at least 1 real source in "sources" (WHO, NASA, Britannica, PubMed...). NEVER invent a URL — leave "sources": [] empty when unsure.
 """
