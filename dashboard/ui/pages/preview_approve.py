@@ -546,6 +546,15 @@ with tab_script:
                     step=0.5,
                     key=f"tab1_dur_{selected_job_id}_{idx}"
                 )
+            _srcs = [s for s in (sc.get("sources") or []) if isinstance(s, dict) and s.get("url")]
+            if sc.get("fact"):
+                st.caption(f"🔎 **Fact:** {sc.get('fact')}")
+            if _srcs:
+                st.markdown("**📚 Nguồn tham khảo:**")
+                for _s in _srcs:
+                    _label = _s.get("title") or _s.get("url")
+                    _pub = f" — {_s['publisher']}" if _s.get("publisher") else ""
+                    st.markdown(f"- [{_label}]({_s['url']}){_pub}")
             st.markdown("<hr style='margin:10px 0; border:none; border-top:1px solid #333;'>", unsafe_allow_html=True)
     else:
         st.info("Kịch bản chưa được khởi tạo. Bạn có thể nhấn nút **[🔄 Viết Lại Kịch Bản Với AI]** ở trên để sinh tự động từ chủ đề.")

@@ -1330,6 +1330,16 @@ def export_job_zip(job_id: str, db: Session = Depends(get_db)):
             }
             zipf.writestr("project_info.json", json.dumps(summary, indent=2, ensure_ascii=False))
 
+        # Task 2.4: luôn đính kèm nguồn trích dẫn trong gói export
+        try:
+            from publish.metadata_generator import build_sources_markdown, build_sources_payload
+            p_data = db_job.pipeline_data or {}
+            zip_scenes = p_data.get("scenes") or (p_data.get("script") or {}).get("scenes") or []
+            zipf.writestr("sources.json", json.dumps(build_sources_payload(zip_scenes), ensure_ascii=False, indent=2))
+            zipf.writestr("sources.md", build_sources_markdown(zip_scenes))
+        except Exception as e_src:
+            logger.warning(f"Could not attach sources files to export zip for job {job_id}: {e_src}")
+
     return FileResponse(
         path=zip_path,
         media_type="application/zip",

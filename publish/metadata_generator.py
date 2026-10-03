@@ -10,6 +10,96 @@ from dotenv import load_dotenv
 load_dotenv()
 
 
+def collect_sources(script: dict) -> list:
+    """Danh sách nguồn trích dẫn từ mọi scene, deduplicate theo URL (Task 2.4)."""
+    seen = set()
+    collected = []
+    for scene in (script or {}).get("scenes") or []:
+        if not isinstance(scene, dict):
+            continue
+        for src in scene.get("sources") or []:
+            if not isinstance(src, dict):
+                continue
+            url = str(src.get("url") or "").strip()
+            if not url or url in seen:
+                continue
+            seen.add(url)
+            collected.append({
+                "title": str(src.get("title") or ""),
+                "url": url,
+                "publisher": str(src.get("publisher") or ""),
+                "accessed_date": str(src.get("accessed_date") or ""),
+            })
+    return collected
+
+
+def format_sources_section(script: dict, language: str = "vi") -> str:
+    """Khối 'Nguồn tham khảo:' để chèn vào mô tả video. Rỗng khi chưa có nguồn."""
+    sources = collect_sources(script)
+    if not sources:
+        return ""
+    heading = "Nguồn tham khảo:" if language == "vi" else "Sources:"
+    lines = [heading]
+    for s in sources:
+        label = s["title"] or s["url"]
+        lines.append(f"- {label}: {s['url']}" if label != s["url"] else f"- {s['url']}")
+    return "\n".join(lines)
+
+
+def append_sources_to_description(description: str, script: dict, language: str = "vi") -> str:
+    """Chèn mục nguồn tham khảo vào cuối mô tả (idempotent)."""
+    section = format_sources_section(script, language)
+    if not section:
+        return description or ""
+    desc = (description or "").rstrip()
+    if section.splitlines()[0] in desc:
+        return description or ""
+    return f"{desc}\n\n{section}" if desc else section
+
+
+def build_sources_payload(scenes: list) -> dict:
+    """Payload cho sources.json khi export ZIP: nguồn dedupe + nguồn theo từng cảnh."""
+    per_scene = []
+    for i, sc in enumerate(scenes or []):
+        if not isinstance(sc, dict):
+            continue
+        srcs = [
+            s for s in (sc.get("sources") or [])
+            if isinstance(s, dict) and str(s.get("url") or "").strip()
+        ]
+        per_scene.append({
+            "scene_index": sc.get("scene_index", sc.get("index", i)),
+            "fact": sc.get("fact", ""),
+            "sources": srcs,
+        })
+    return {"sources": collect_sources({"scenes": scenes or []}), "scenes": per_scene}
+
+
+def build_sources_markdown(scenes: list) -> str:
+    """Nội dung sources.md khi export ZIP."""
+    payload = build_sources_payload(scenes)
+    lines = ["# Nguồn tham khảo", ""]
+    if payload["sources"]:
+        for s in payload["sources"]:
+            title = s["title"] or s["url"]
+            extras = [x for x in [s["publisher"], (f"truy cập {s['accessed_date']}" if s["accessed_date"] else "")] if x]
+            lines.append(f"- [{title}]({s['url']})" + (f" — {' · '.join(extras)}" if extras else ""))
+    else:
+        lines.append("_Chưa có nguồn trích dẫn nào được ghi nhận._")
+
+    lines += ["", "## Nguồn theo từng cảnh", ""]
+    for item in payload["scenes"]:
+        fact = item["fact"] or "(không có fact)"
+        lines.append(f"### Cảnh #{int(item['scene_index']) + 1}: {fact}")
+        if item["sources"]:
+            for s in item["sources"]:
+                lines.append(f"- [{s.get('title') or s['url']}]({s['url']})")
+        else:
+            lines.append("- (chưa có nguồn)")
+        lines.append("")
+    return "\n".join(lines)
+
+
 class MetadataGenerator:
     """
     Sinh metadata SEO-optimized cho video:
@@ -45,7 +135,7 @@ class MetadataGenerator:
         
         if not self.gemini.api_keys:
             logger.info("Chưa có Gemini API key, sử dụng fallback metadata từ kịch bản.")
-            return self._fallback_metadata(script, language)
+            return self._with_sources_section(self._fallback_metadata(script, language), script, language)
             
         # Tạo prompt theo platform
         prompt = self._build_prompt(script, language, style, platform)
@@ -63,12 +153,12 @@ class MetadataGenerator:
             
             metadata = json.loads(json_str)
             logger.success(f"✅ Đã sinh metadata: {metadata.get('title', '')[:50]}...")
-            return metadata
-            
+            return self._with_sources_section(metadata, script, language)
+
         except Exception as e:
             logger.error(f"❌ Lỗi sinh metadata: {e}")
             # Fallback: dùng thông tin từ script
-            return self._fallback_metadata(script, language)
+            return self._with_sources_section(self._fallback_metadata(script, language), script, language)
     
     def _build_prompt(self, script: dict, language: str, style: str, platform: str) -> str:
         """Tạo prompt sinh metadata"""
@@ -135,6 +225,16 @@ Requirements:
 - Description starts with a hook
 - Hashtags must be trending and relevant"""
     
+    @staticmethod
+    def _with_sources_section(metadata: dict, script: dict, language: str) -> dict:
+        """Chèn mục 'Nguồn tham khảo:' vào mô tả + đính kèm danh sách nguồn (Task 2.4)."""
+        if isinstance(metadata, dict):
+            metadata["description"] = append_sources_to_description(
+                metadata.get("description", ""), script, language
+            )
+            metadata["sources"] = collect_sources(script)
+        return metadata
+
     def _fallback_metadata(self, script: dict, language: str) -> dict:
         """Fallback metadata nếu Gemini thất bại"""
         title = script.get("title", "Video mới")
