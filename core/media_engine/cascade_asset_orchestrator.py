@@ -55,6 +55,7 @@ except ImportError:
 
 from core.media_engine.asset_content_validator import AssetContentValidator, ValidationResult
 from core.media_engine.procedural_asset_synthesizer import ProceduralAssetSynthesizer
+from core.config import get_gemini_model
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
 
@@ -119,7 +120,7 @@ class CascadeAssetOrchestrator:
 
         self.api_keys = self._load_api_keys()
         self.current_key_idx = 0
-        self.gemini_model = os.getenv("GEMINI_MODEL", "gemini-1.5-flash")
+        self.gemini_model = get_gemini_model()
 
         # Network timeouts
         self.tier1_timeout = 20.0

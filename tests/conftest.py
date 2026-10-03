@@ -28,6 +28,7 @@ UNIT_FILES = {
     "test_cascade_asset_orchestrator_unit.py",
     "test_challenge_stress_m1.py",
     "test_challenger_2_empirical.py",
+    "test_config_single_source.py",
     "test_database_challenger.py",
     "test_dictionary_coverage.py",
     "test_fallback_no_hardcoded_stats.py",

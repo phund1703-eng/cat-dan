@@ -1,9 +1,11 @@
-import yaml
 import asyncio
 from pathlib import Path
 from typing import List, Dict, Any
 from loguru import logger
 from dotenv import load_dotenv
+
+from core.config import get_settings
+
 from .edge_tts_client import EdgeTTSClient
 from .fish_audio_client import FishAudioClient
 from .vieneu_client import VieNeuClient
@@ -22,15 +24,9 @@ class TTSManager:
         self.primary_engine = self.config.get("tts", {}).get("primary_engine", "auto")
 
     def _load_config(self) -> Dict[str, Any]:
-        """Loads configuration from config/settings.yaml if available."""
-        config_path = Path("config/settings.yaml")
-        if config_path.exists():
-            try:
-                with open(config_path, "r", encoding="utf-8") as f:
-                    return yaml.safe_load(f) or {}
-            except Exception as e:
-                logger.warning(f"Failed to load config/settings.yaml: {e}")
-        return {}
+        """Nạp cấu hình từ nguồn duy nhất core.config.get_settings()
+        (config/settings.yaml, resolve theo thư mục gốc repo)."""
+        return get_settings()
 
     async def synthesize(
         self,

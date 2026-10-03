@@ -6,6 +6,8 @@ import google.generativeai as genai
 from loguru import logger
 from dotenv import load_dotenv
 
+from core.config import get_gemini_model
+
 load_dotenv()
 
 DEFAULT_FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-flash-latest"]
@@ -32,9 +34,16 @@ class GeminiClient:
             self._apply_current_key()
             logger.info(f"GeminiClient initialized with {len(self.api_keys)} API key(s). Active key: Key #{self.current_key_index + 1}")
             
-        self.fallback_models = list(DEFAULT_FALLBACK_MODELS)
-        self.default_model = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
-        self.pro_model = os.getenv("GEMINI_PRO_MODEL", "gemini-3.8-flash")
+        # Model Gemini đọc từ nguồn cấu hình duy nhất (core/config.py):
+        # env GEMINI_MODEL/GEMINI_PRO_MODEL (override) → settings.yaml llm.*.
+        self.default_model = get_gemini_model()
+        self.pro_model = get_gemini_model(pro=True)
+        # Chuỗi fallback: model mặc định hiện tại đứng đầu, sau đó tới
+        # danh sách fallback chuẩn (dedup, giữ nguyên thứ tự cũ khi
+        # settings.yaml để model mặc định).
+        self.fallback_models = list(
+            dict.fromkeys([self.default_model, *DEFAULT_FALLBACK_MODELS])
+        )
 
     def _apply_current_key(self):
         """Applies the current active API key to genai."""

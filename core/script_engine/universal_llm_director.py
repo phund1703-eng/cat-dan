@@ -37,6 +37,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple, Union
 from loguru import logger
 from dotenv import load_dotenv
+from core.config import get_gemini_model
 
 load_dotenv()
 
@@ -1341,7 +1342,7 @@ class UniversalLLMDirector:
                     self.api_keys.append(k.strip())
 
         self.current_key_idx = 0
-        self.gemini_model_name = model or os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        self.gemini_model_name = model or get_gemini_model()
 
         # Cấu hình Qwen Ollama
         self.ollama_url = ollama_url or os.getenv("OLLAMA_BASE_URL", "http://localhost:11434/v1")

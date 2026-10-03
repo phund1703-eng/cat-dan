@@ -58,7 +58,16 @@ TERMINAL_STATUSES = {
 
 
 def load_max_concurrent_jobs(config_path: Optional[Path] = None) -> int:
-    """Đọc queue.max_concurrent_jobs; mặc định an toàn = 2 khi thiếu/lỗi."""
+    """
+    Đọc số job chạy đồng thời tối đa.
+
+    Thứ tự ưu tiên: biến môi trường CATDAN_MAX_CONCURRENT_JOBS →
+    `queue.max_concurrent_jobs` trong cấu hình. Mặc định an toàn = 2.
+
+    Khi truyền `config_path` (test/smoke), đọc trực tiếp file đó;
+    không truyền thì dùng nguồn cấu hình duy nhất core.config
+    (config/settings.yaml qua CATDAN_SETTINGS_FILE nếu có).
+    """
     env_val = os.environ.get("CATDAN_MAX_CONCURRENT_JOBS", "").strip()
     if env_val:
         try:
@@ -66,7 +75,12 @@ def load_max_concurrent_jobs(config_path: Optional[Path] = None) -> int:
         except ValueError:
             logger.warning(f"CATDAN_MAX_CONCURRENT_JOBS không hợp lệ: {env_val!r}; bỏ qua")
 
-    path = Path(config_path) if config_path else DEFAULT_SETTINGS_PATH
+    if config_path is None:
+        from core.config import get_queue_max_concurrent_jobs
+
+        return get_queue_max_concurrent_jobs()
+
+    path = Path(config_path)
     try:
         if path.exists():
             data = yaml.safe_load(path.read_text(encoding="utf-8")) or {}

@@ -14,6 +14,7 @@ from PIL import Image
 from loguru import logger
 from dotenv import load_dotenv
 import google.generativeai as genai
+from core.config import get_gemini_model
 
 load_dotenv()
 
@@ -42,7 +43,7 @@ class SemanticVerifier:
         self.current_key_idx = 0
         if self.api_keys:
             genai.configure(api_key=self.api_keys[0])
-        self.model_name = os.getenv("GEMINI_MODEL", "gemini-3.6-flash")
+        self.model_name = get_gemini_model()
 
     def _switch_key(self):
         if len(self.api_keys) > 1:

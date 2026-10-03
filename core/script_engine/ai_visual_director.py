@@ -25,6 +25,7 @@ from pathlib import Path
 from typing import Dict, Any, List, Optional, Tuple, Union
 from loguru import logger
 from dotenv import load_dotenv
+from core.config import get_gemini_model
 
 load_dotenv()
 
@@ -310,7 +311,7 @@ class AIVisualDirector:
             if k and k.strip() and not k.strip().startswith("your_") and k.strip() not in self.api_keys:
                 self.api_keys.append(k.strip())
         self.current_key_idx = 0
-        self.model_name = os.getenv("GEMINI_MODEL", "gemini-2.5-flash")
+        self.model_name = get_gemini_model()
 
     async def direct_scene(
         self,
