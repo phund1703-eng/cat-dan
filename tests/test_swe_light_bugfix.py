@@ -15,7 +15,7 @@ from pathlib import Path
 from PIL import Image
 import numpy as np
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 
 # Imports under test
 from core.script_engine.universal_llm_director import UniversalLLMDirector

@@ -22,7 +22,7 @@ from unittest.mock import patch, MagicMock, AsyncMock
 from pathlib import Path
 from PIL import Image, ImageDraw
 
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 if str(PROJECT_ROOT) not in sys.path:
     sys.path.insert(0, str(PROJECT_ROOT))
 
@@ -322,7 +322,10 @@ class TestCascadeAssetOrchestratorUnit(unittest.TestCase):
         self.assertEqual(styled.size, (512, 512))
 
         # Check alpha ratio compliance
-        save_tmp = self.tmp_path / "test_keyline_check.png"
+        # (tên file không bắt đầu bằng "test_": AssetContentValidator hiện
+        # từ chối stem test_*/temp_* như file tạm — đổi tên để test đúng
+        # mục đích kiểm tra keyline/shadow, assert giữ nguyên)
+        save_tmp = self.tmp_path / "keyline_check.png"
         styled.save(str(save_tmp), format="PNG")
         val_res = self.validator.validate_cutout(save_tmp)
         self.assertTrue(val_res.is_valid, f"Styled asset failed validation: {val_res.reason}")

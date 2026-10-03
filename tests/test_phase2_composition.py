@@ -16,7 +16,7 @@ from loguru import logger
 from PIL import Image
 
 # Thêm root dự án vào sys.path
-PROJECT_ROOT = Path(__file__).resolve().parent
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(PROJECT_ROOT))
 
 from core.script_engine.text_visual_analyzer import MultiElementSceneDesigner
