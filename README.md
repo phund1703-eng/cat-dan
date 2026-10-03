@@ -29,23 +29,23 @@ AutoVideoFactory/
 │   ├── whiteboard/          # Whiteboard Animation
 │   └── ai_avatar/           # SadTalker / MuseTalk
 ├── publish/                 # Đăng lên mạng xã hội
-│   ├── postiz_client/       # Postiz self-hosted
-│   └── platform_adapters/   # YouTube / TikTok / Facebook
+│   └── postiz_client/       # Postiz self-hosted (đăng YouTube / TikTok / Facebook)
 ├── dashboard/               # Giao diện quản lý
 │   ├── api/                 # FastAPI backend
-│   ├── worker/              # Celery job queue
+│   ├── worker/              # Worker chạy job (poll DB, tự resume — không cần Redis/Celery)
 │   └── ui/                  # Streamlit frontend
 ├── assets/                  # Tài nguyên
+│   ├── fonts/               # Be Vietnam Pro (OFL) — font phụ đề/thumbnail
 │   ├── voices/              # Mẫu giọng để clone
 │   ├── avatars/             # Ảnh avatar AI
-│   ├── music/               # Nhạc nền royalty-free
+│   ├── music/               # Nhạc nền royalty-free (CC BY — xem assets/music/README.md)
 │   └── templates/           # Video templates
 ├── data/                    # Dữ liệu
 │   ├── jobs/                # Metadata job
 │   ├── output/              # Video đã render
 │   └── cache/               # Cache assets
 └── config/                  # Cấu hình
-    ├── settings.yaml        # API keys + settings
+    ├── settings.yaml        # Cấu hình hành vi (API keys nằm trong .env)
     └── channels.yaml        # Cấu hình kênh
 ```
 
@@ -64,9 +64,13 @@ AutoVideoFactory/
 git clone <repo-url>
 cd AutoVideoFactory
 
-# Chạy script cài đặt
+# Chạy script cài đặt (tự kiểm tra font/nhạc nền, thiếu sẽ tải về)
 install.bat
 ```
+
+Font và nhạc nền đã được đóng gói sẵn trong repo (`assets/fonts`, `assets/music`);
+nếu thiếu, `install.bat` tự chạy `python scripts/download_assets.py` để tải lại
+từ nguồn chính thức.
 
 ### Bước 3: Cấu Hình API Keys
 ```bash
@@ -144,7 +148,8 @@ Xem file [`config/settings.yaml`](config/settings.yaml) để tùy chỉnh:
 
 ## 🤝 Đóng Góp
 
-Xem [CONTRIBUTING.md](CONTRIBUTING.md) để biết cách đóng góp.
+Mở issue hoặc gửi pull request trực tiếp trên GitHub. Chạy `pytest tests/ -m unit`
+trước khi gửi để chắc chắn không làm hỏng tính năng cũ.
 
 ## 📄 Giấy Phép
 
