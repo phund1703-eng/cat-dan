@@ -6,6 +6,23 @@ import plotly.express as px
 
 API_URL = os.getenv('API_URL', 'http://localhost:8000')
 
+
+# Task 5.4: session gọi API tự gắn X-API-Key (lấy từ SECRET_KEY trong env)
+# cho các request GHI; khi SECRET_KEY chưa đặt thì không gắn gì (API mở).
+class _ApiSession(requests.Session):
+    """requests.Session tự đính kèm X-API-Key cho POST/PUT/PATCH/DELETE."""
+
+    def request(self, method, url, **kwargs):
+        api_key = os.getenv("SECRET_KEY", "").strip()
+        if api_key and str(method).upper() not in ("GET", "HEAD", "OPTIONS"):
+            headers = dict(kwargs.get("headers") or {})
+            headers.setdefault("X-API-Key", api_key)
+            kwargs["headers"] = headers
+        return super().request(method, url, **kwargs)
+
+
+api = _ApiSession()
+
 st.title("Thống Kê Analytics")
 
 try:

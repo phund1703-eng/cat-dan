@@ -9,6 +9,23 @@ import requests
 
 API_URL = os.getenv('API_URL', 'http://localhost:8000')
 
+
+# Task 5.4: session gọi API tự gắn X-API-Key (lấy từ SECRET_KEY trong env)
+# cho các request GHI; khi SECRET_KEY chưa đặt thì không gắn gì (API mở).
+class _ApiSession(requests.Session):
+    """requests.Session tự đính kèm X-API-Key cho POST/PUT/PATCH/DELETE."""
+
+    def request(self, method, url, **kwargs):
+        api_key = os.getenv("SECRET_KEY", "").strip()
+        if api_key and str(method).upper() not in ("GET", "HEAD", "OPTIONS"):
+            headers = dict(kwargs.get("headers") or {})
+            headers.setdefault("X-API-Key", api_key)
+            kwargs["headers"] = headers
+        return super().request(method, url, **kwargs)
+
+
+api = _ApiSession()
+
 st.title("🎬 Tạo Dự Án Video Mới")
 
 def fetch_voice_presets():
@@ -72,7 +89,7 @@ with st.expander("🎙️ Quản lý & Nghe Thử Mẫu Giọng Đọc (VieNeu-T
         if voice_file and st.button("📤 Tải lên giọng", key="upload_voice_btn", use_container_width=True):
             try:
                 files = {"file": (voice_file.name, voice_file.getvalue(), voice_file.type or "audio/wav")}
-                res = requests.post(f"{API_URL}/voices/upload", files=files, timeout=10.0)
+                res = api.post(f"{API_URL}/voices/upload", files=files, timeout=10.0)
                 if res.status_code in [200, 201]:
                     st.success(f"Đã lưu mẫu giọng: `{voice_file.name}`")
                     st.rerun()
@@ -188,7 +205,7 @@ with st.form("create_job_form"):
                     "art_style": art_style,
                     "voice_preset": clean_voice
                 }
-                res = requests.post(f"{API_URL}/jobs", json=payload, timeout=30.0)
+                res = api.post(f"{API_URL}/jobs", json=payload, timeout=30.0)
                 res.raise_for_status()
                 data = res.json()
                 job_id = data['id']

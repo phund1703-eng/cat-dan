@@ -25,6 +25,7 @@ import pytest  # noqa: E402
 # unit: offline thuần (mock/fixture/local compute)
 UNIT_FILES = {
     "test_adversarial_m1_api.py",
+    "test_api_security_upload.py",
     "test_asset_provenance.py",
     "test_cascade_asset_orchestrator_unit.py",
     "test_challenge_stress_m1.py",

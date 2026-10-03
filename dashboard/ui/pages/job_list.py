@@ -9,6 +9,23 @@ import pandas as pd
 
 API_URL = os.getenv('API_URL', 'http://localhost:8000')
 
+
+# Task 5.4: session gọi API tự gắn X-API-Key (lấy từ SECRET_KEY trong env)
+# cho các request GHI; khi SECRET_KEY chưa đặt thì không gắn gì (API mở).
+class _ApiSession(requests.Session):
+    """requests.Session tự đính kèm X-API-Key cho POST/PUT/PATCH/DELETE."""
+
+    def request(self, method, url, **kwargs):
+        api_key = os.getenv("SECRET_KEY", "").strip()
+        if api_key and str(method).upper() not in ("GET", "HEAD", "OPTIONS"):
+            headers = dict(kwargs.get("headers") or {})
+            headers.setdefault("X-API-Key", api_key)
+            kwargs["headers"] = headers
+        return super().request(method, url, **kwargs)
+
+
+api = _ApiSession()
+
 st.title("📋 Danh Sách Dự Án Video")
 
 def fetch_jobs_data():
@@ -156,7 +173,7 @@ else:
             if sel_job.get("status") == "failed" or sel_job.get("stage") == "failed":
                 if st.button("🔁 Thử lại dự án này", use_container_width=True):
                     try:
-                        r = requests.post(f"{API_URL}/jobs/{action_job_id}/retry", timeout=5.0)
+                        r = api.post(f"{API_URL}/jobs/{action_job_id}/retry", timeout=5.0)
                         if r.status_code == 200:
                             st.success("Đang kích hoạt thử lại dự án!")
                             st.rerun()
@@ -170,7 +187,7 @@ else:
         with c_act3:
             if st.button("🗑️ Xóa dự án", use_container_width=True):
                 try:
-                    r = requests.delete(f"{API_URL}/jobs/{action_job_id}", timeout=5.0)
+                    r = api.delete(f"{API_URL}/jobs/{action_job_id}", timeout=5.0)
                     if r.status_code == 200:
                         st.success("Đã xóa dự án thành công!")
                         if st.session_state.get("selected_job_id") == action_job_id:

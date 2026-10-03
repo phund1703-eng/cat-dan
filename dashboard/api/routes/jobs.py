@@ -1010,14 +1010,17 @@ async def _do_upload_scene_image(
     if raw_ext not in allowed_exts:
         raise HTTPException(status_code=400, detail="Only image files (.png, .jpg, .jpeg, .webp) are allowed")
 
-    ext = raw_ext.lstrip(".")
+    # Task 5.4: validate dung lượng + magic bytes qua helper dùng chung
+    # (file .exe đổi đuôi .png bị chặn tại đây; đuôi lưu theo định dạng thật)
+    from dashboard.api.upload_validation import validate_image_upload
+
+    content, fmt = await validate_image_upload(file)
 
     img_dir = f"data/output/{job_id}/images"
     os.makedirs(img_dir, exist_ok=True)
-    saved_filename = f"scene_{scene_index}_uploaded.{ext}"
+    saved_filename = f"scene_{scene_index}_uploaded.{fmt}"
     saved_filepath = f"{img_dir}/{saved_filename}"
 
-    content = await file.read()
     with open(saved_filepath, "wb") as f:
         f.write(content)
 

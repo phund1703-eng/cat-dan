@@ -15,6 +15,23 @@ import pandas as pd
 
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 
+
+# Task 5.4: session gọi API tự gắn X-API-Key (lấy từ SECRET_KEY trong env)
+# cho các request GHI; khi SECRET_KEY chưa đặt thì không gắn gì (API mở).
+class _ApiSession(requests.Session):
+    """requests.Session tự đính kèm X-API-Key cho POST/PUT/PATCH/DELETE."""
+
+    def request(self, method, url, **kwargs):
+        api_key = os.getenv("SECRET_KEY", "").strip()
+        if api_key and str(method).upper() not in ("GET", "HEAD", "OPTIONS"):
+            headers = dict(kwargs.get("headers") or {})
+            headers.setdefault("X-API-Key", api_key)
+            kwargs["headers"] = headers
+        return super().request(method, url, **kwargs)
+
+
+api = _ApiSession()
+
 # =============================================================================
 # Helper Utilities
 # =============================================================================
@@ -317,7 +334,7 @@ if stage == "failed":
     st.error(f"⚠️ Dự án gặp sự cố trong quá trình xử lý: {job.get('error', 'Lỗi không xác định')}")
     if st.button("🔁 Thử Lại Dự Án Này", key=f"btn_retry_job_{selected_job_id}"):
         try:
-            r_retry = requests.post(f"{API_URL}/jobs/{selected_job_id}/retry", timeout=5.0)
+            r_retry = api.post(f"{API_URL}/jobs/{selected_job_id}/retry", timeout=5.0)
             if r_retry.status_code == 200:
                 st.success("Đang kích hoạt thử lại dự án!")
                 st.rerun()
@@ -369,7 +386,7 @@ if stage == "source_review":
             st.error("Anh chưa nhập URL nguồn nào cho các cảnh thiếu nguồn.")
         else:
             try:
-                r_src = requests.post(
+                r_src = api.post(
                     f"{API_URL}/jobs/{selected_job_id}/step/sources",
                     json={"scenes": _updates},
                     timeout=15.0,
@@ -377,7 +394,7 @@ if stage == "source_review":
                 if r_src.status_code != 200:
                     st.error(f"Lỗi lưu nguồn: {r_src.text}")
                 else:
-                    r_cont = requests.post(f"{API_URL}/jobs/{selected_job_id}/continue-source-review", timeout=15.0)
+                    r_cont = api.post(f"{API_URL}/jobs/{selected_job_id}/continue-source-review", timeout=15.0)
                     if r_cont.status_code == 200:
                         st.success("✅ Đã lưu nguồn, hệ thống đang tiếp tục sản xuất!")
                         st.rerun()
@@ -468,7 +485,7 @@ with tab_script:
         }
 
         try:
-            r_put = requests.put(
+            r_put = api.put(
                 f"{API_URL}/jobs/{selected_job_id}/step/script",
                 json=save_payload,
                 timeout=15.0
@@ -504,7 +521,7 @@ with tab_script:
     if btn_regen_script:
         with st.spinner("Đang yêu cầu Gemini AI viết lại kịch bản chuẩn cho chủ đề..."):
             try:
-                r_post = requests.post(
+                r_post = api.post(
                     f"{API_URL}/jobs/{selected_job_id}/step/script",
                     json={"topic": job.get("topic"), "art_style": art_style},
                     timeout=30.0
@@ -582,7 +599,7 @@ with tab_voice:
         ):
             with st.spinner("Đang tổng hợp giọng đọc toàn bộ các cảnh qua VieNeu-TTS..."):
                 try:
-                    r_voice = requests.post(
+                    r_voice = api.post(
                         f"{API_URL}/jobs/{selected_job_id}/step/voice",
                         json={"voice_preset": voice_preset, "engine": "auto"},
                         timeout=45.0
@@ -636,7 +653,7 @@ with tab_voice:
                 if st.button("🔄 Sinh Lại Âm Thanh Cảnh Này", key=f"btn_vregen_{selected_job_id}_{idx}"):
                     with st.spinner(f"Đang sinh lại âm thanh Cảnh #{idx + 1} qua VieNeu-TTS..."):
                         try:
-                            r_vsc = requests.post(
+                            r_vsc = api.post(
                                 f"{API_URL}/jobs/{selected_job_id}/step/voice-scene",
                                 json={
                                     "scene_index": int(idx),
@@ -691,7 +708,7 @@ with tab_storyboard:
         ):
             with st.spinner("Đang điều phối sinh toàn bộ ảnh Storyboard & kiểm định Vision Gate..."):
                 try:
-                    r_sb = requests.post(
+                    r_sb = api.post(
                         f"{API_URL}/jobs/{selected_job_id}/step/storyboard",
                         json={"art_style": art_style},
                         timeout=60.0
@@ -796,7 +813,7 @@ with tab_storyboard:
                     if st.button("🔄 Sinh Lại Ảnh Cảnh Này", key=f"btn_regen_img_{selected_job_id}_{idx}", use_container_width=True):
                         with st.spinner(f"Đang sinh lại ảnh Cảnh #{idx + 1}..."):
                             try:
-                                r_regen = requests.post(
+                                r_regen = api.post(
                                     f"{API_URL}/jobs/{selected_job_id}/step/regenerate-scene-image",
                                     json={"scene_index": int(sc_idx), "prompt": cur_prompt.strip()},
                                     timeout=35.0
@@ -821,7 +838,7 @@ with tab_storyboard:
                                 try:
                                     files = {"file": (up_img.name, up_img.getvalue(), up_img.type or "image/png")}
                                     data = {"scene_index": int(sc_idx)}
-                                    r_up = requests.post(
+                                    r_up = api.post(
                                         f"{API_URL}/jobs/{selected_job_id}/step/upload-scene-image",
                                         data=data,
                                         files=files,
@@ -849,7 +866,7 @@ with tab_storyboard:
         ):
             with st.spinner("Đang kích hoạt render video tiếp tục..."):
                 try:
-                    r_cont = requests.post(
+                    r_cont = api.post(
                         f"{API_URL}/jobs/{selected_job_id}/continue-render",
                         json={"job_id": selected_job_id},
                         timeout=10.0
@@ -882,7 +899,7 @@ with tab_effects:
         ):
             with st.spinner("Đang khởi tạo phụ đề Karaoke Dynamic và tổng hợp lệnh FFmpeg..."):
                 try:
-                    r_fx = requests.post(
+                    r_fx = api.post(
                         f"{API_URL}/jobs/{selected_job_id}/step/effects",
                         json={"chunk_words": 3, "margin_v": 180, "font_size": 44},
                         timeout=30.0
@@ -962,7 +979,7 @@ with tab_master:
     ):
         with st.spinner("Đang thực hiện ghép video, chèn nhạc và ép phụ đề Karaoke bằng FFmpeg..."):
             try:
-                r_render = requests.post(
+                r_render = api.post(
                     f"{API_URL}/jobs/{selected_job_id}/step/render",
                     json={"force": True},
                     timeout=90.0
@@ -1057,7 +1074,7 @@ with tab_master:
             )
             if st.form_submit_button("🔄 Tạo Lại Thumbnail", use_container_width=True):
                 try:
-                    r_thumb = requests.post(
+                    r_thumb = api.post(
                         f"{API_URL}/jobs/{selected_job_id}/thumbnail",
                         json={"thumbnail_text": edited_thumbnail_text},
                         timeout=30.0,
@@ -1112,7 +1129,7 @@ with tab_master:
 
                 scheduled_at = None
                 try:
-                    r_approve = requests.put(
+                    r_approve = api.put(
                         f"{API_URL}/jobs/{selected_job_id}/approve",
                         json={"job_id": selected_job_id, "platforms": platforms},
                         timeout=3.0

@@ -7,6 +7,8 @@ from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from dashboard.api.database import create_tables
 from dashboard.api.routes import jobs, channels
+from dashboard.api.security import ApiKeyMiddleware, is_auth_enabled
+from dashboard.api.upload_validation import validate_audio_upload
 
 # Ensure static and asset directories exist before mounting
 os.makedirs("./data", exist_ok=True)
@@ -18,6 +20,9 @@ app = FastAPI(
     description="API backend for AutoVideoFactory Dashboard",
     version="1.0.0"
 )
+
+# Task 5.4: khoá endpoint ghi bằng X-API-Key khi đã đặt SECRET_KEY
+app.add_middleware(ApiKeyMiddleware)
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,6 +43,12 @@ app.include_router(channels.router, prefix="/channels", tags=["Channels"])
 @app.on_event("startup")
 async def startup_event():
     logger.info("Starting up AutoVideoFactory API")
+    if is_auth_enabled():
+        logger.info("🔒 [API Security] X-API-Key đang BẬT cho các endpoint ghi (SECRET_KEY đã đặt).")
+    else:
+        logger.warning(
+            "⚠️ [API Security] SECRET_KEY chưa đặt — endpoint ghi KHÔNG khoá (chỉ nên dùng khi dev localhost)."
+        )
     create_tables()
     try:
         from dashboard.api.publish_scheduler import start_publish_scheduler
@@ -108,15 +119,18 @@ async def upload_voice(file: UploadFile = File(...)):
     ext = os.path.splitext(filename)[1].lower()
     if ext not in [".wav", ".mp3"]:
         raise HTTPException(status_code=400, detail="Only .wav and .mp3 files are supported")
-    
+
+    # Task 5.4: validate dung lượng + magic bytes qua helper dùng chung
+    # (file .exe đổi đuôi .mp3 bị chặn tại đây)
+    content, _fmt = await validate_audio_upload(file)
+
     voices_dir = "./assets/voices"
     os.makedirs(voices_dir, exist_ok=True)
     save_path = os.path.join(voices_dir, filename)
-    
-    content = await file.read()
+
     with open(save_path, "wb") as f:
         f.write(content)
-        
+
     return {
         "status": "success",
         "filename": filename,
