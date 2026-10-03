@@ -1009,6 +1009,41 @@ with tab_master:
                 help="Tài nguyên ZIP chưa sẵn sàng"
             )
 
+        # Thumbnail review/edit (Task 3.2)
+        st.markdown("---")
+        st.markdown("#### 🖼️ Thumbnail Master")
+        thumbnail_meta = pipeline_data.get("metadata") or job.get("metadata") or {}
+        thumbnail_file = (
+            pipeline_data.get("thumbnail_path")
+            or f"data/output/{selected_job_id}/thumbnail.jpg"
+        )
+        if thumbnail_file and os.path.exists(thumbnail_file):
+            st.image(thumbnail_file, caption="Thumbnail 1080×1920", use_container_width=True)
+        elif pipeline_data.get("thumbnail_error"):
+            st.warning(f"Chưa tạo được thumbnail: {pipeline_data.get('thumbnail_error')}")
+        else:
+            st.info("Thumbnail sẽ tự sinh khi Master Video hoàn tất.")
+        with st.form(f"thumbnail_form_{selected_job_id}"):
+            edited_thumbnail_text = st.text_input(
+                "Chữ trên thumbnail",
+                value=pipeline_data.get("thumbnail_text") or thumbnail_meta.get("thumbnail_text", ""),
+                max_chars=60,
+            )
+            if st.form_submit_button("🔄 Tạo Lại Thumbnail", use_container_width=True):
+                try:
+                    r_thumb = requests.post(
+                        f"{API_URL}/jobs/{selected_job_id}/thumbnail",
+                        json={"thumbnail_text": edited_thumbnail_text},
+                        timeout=30.0,
+                    )
+                    if r_thumb.status_code == 200:
+                        st.success("Đã tạo lại thumbnail!")
+                        st.rerun()
+                    else:
+                        st.error(f"Lỗi tạo thumbnail: {r_thumb.text}")
+                except Exception as ex:
+                    st.error(f"Lỗi kết nối: {ex}")
+
     with col_pub:
         st.markdown("### 🚀 Phê Duyệt & Xuất Bản")
         with st.form(f"publish_form_{selected_job_id}"):

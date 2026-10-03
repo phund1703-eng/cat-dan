@@ -284,6 +284,114 @@ def _verify_rendered_video(video_path: str, expected_duration: float = 0.0) -> T
     return True, f"OK ({size} bytes, {info.get('width')}x{info.get('height')}, {duration:.2f}s)"
 
 
+def _ensure_job_thumbnail(
+    job,
+    pipeline_data: Dict[str, Any],
+    *,
+    force: bool = False,
+    thumbnail_text: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Ensure a completed job has a thumbnail next to final_video.mp4.
+
+    MetadataGenerator supplies thumbnail_text when the pipeline has not stored
+    one. User-supplied text (preview approval) wins and forces regeneration.
+    Failures are non-fatal for rendering but are audited as thumbnail_error.
+    """
+    from core.render_engine.thumbnail_generator import generate_job_thumbnails
+
+    job_dir = Path("data/output") / job.id
+    existing_path = pipeline_data.get("thumbnail_path")
+    if not force and existing_path and Path(existing_path).exists():
+        return {
+            "thumbnail_path": existing_path,
+            "thumbnail_portrait_path": pipeline_data.get("thumbnail_portrait_path", existing_path),
+            **(
+                {"thumbnail_landscape_path": pipeline_data["thumbnail_landscape_path"]}
+                if pipeline_data.get("thumbnail_landscape_path")
+                else {}
+            ),
+            "thumbnail_text": pipeline_data.get("thumbnail_text", ""),
+        }
+
+    script = pipeline_data.get("script")
+    if not isinstance(script, dict):
+        script = getattr(job, "script", None) or {}
+    metadata: Dict[str, Any] = {}
+    if isinstance(pipeline_data.get("metadata"), dict):
+        metadata.update(pipeline_data["metadata"])
+    if isinstance(getattr(job, "extra_metadata", None), dict):
+        metadata.update(job.extra_metadata)
+
+    resolved_text = thumbnail_text or metadata.get("thumbnail_text") or pipeline_data.get("thumbnail_text")
+    if not resolved_text:
+        try:
+            from publish.metadata_generator import MetadataGenerator
+
+            generated = run_in_async_loop(
+                MetadataGenerator().generate(
+                    script,
+                    language=getattr(job, "language", "vi") or "vi",
+                    style=getattr(job, "style", "collage_broll") or "collage_broll",
+                )
+            )
+            if isinstance(generated, dict):
+                metadata.update({k: v for k, v in generated.items() if v not in (None, "", [])})
+                resolved_text = generated.get("thumbnail_text")
+        except Exception as exc:
+            logger.warning(f"MetadataGenerator thumbnail text failed for job {job.id}: {exc}")
+    if not resolved_text:
+        resolved_text = metadata.get("title") or script.get("title") or job.topic
+
+    source_image = None
+    snapshot = job_dir / "snapshot.jpg"
+    if snapshot.exists():
+        source_image = snapshot
+    else:
+        for scene in pipeline_data.get("scenes") or pipeline_data.get("storyboard") or []:
+            if isinstance(scene, dict) and scene.get("image_path") and Path(scene["image_path"]).exists():
+                source_image = Path(scene["image_path"])
+                break
+
+    video_format = pipeline_data.get("format") or getattr(job, "format", "shorts") or "shorts"
+    result = generate_job_thumbnails(
+        job_dir,
+        str(resolved_text),
+        source_image_path=source_image,
+        video_path=job.output_path or (job_dir / "final_video.mp4"),
+        video_format=str(video_format),
+    )
+    if metadata:
+        metadata["thumbnail_text"] = result["thumbnail_text"]
+        pipeline_data["metadata"] = metadata
+    pipeline_data.update(result)
+    pipeline_data.pop("thumbnail_error", None)
+    return result
+
+
+def regenerate_job_thumbnail(job_id: str, thumbnail_text: Optional[str] = None) -> Dict[str, Any]:
+    """Regenerate a job thumbnail, optionally with user-edited text."""
+    db = SessionLocal()
+    try:
+        job = get_job(db, job_id)
+        if not job:
+            raise ValueError(f"Job {job_id} not found in DB")
+        pipeline_data = job.pipeline_data or {}
+        result = _ensure_job_thumbnail(
+            job,
+            pipeline_data,
+            force=True,
+            thumbnail_text=thumbnail_text,
+        )
+        job.pipeline_data = pipeline_data
+        job.updated_at = datetime.utcnow()
+        db.commit()
+        db.refresh(job)
+        return result
+    finally:
+        db.close()
+
+
 async def _async_execute_stages_2_and_3(job_id: str):
     """
     Executes Stages 2 (voice) and 3 (assets), then Stages 4/5 unless the job
@@ -875,6 +983,13 @@ def _execute_stages_4_and_5(db, job_id: str):
     if job:
         job.output_path = output_path
         db.commit()
+        # Task 3.2: every done job gets a reviewable thumbnail. Thumbnail
+        # problems should not invalidate an otherwise verified master video.
+        try:
+            _ensure_job_thumbnail(job, pipeline_data)
+        except Exception as e_thumb:
+            logger.warning(f"Thumbnail generation failed for job {job_id}: {e_thumb}")
+            pipeline_data["thumbnail_error"] = str(e_thumb)
 
     update_job_stage(db, job_id, "done", status=JobStatus.done, pipeline_data=pipeline_data)
     logger.success(f"🏆 [Job {job_id}] STAGE 5 COMPLETE: Pipeline finished successfully (status=done)!")
@@ -1221,6 +1336,17 @@ def publish_video(job_id: str, platforms: list, schedule_time: Union[str, dateti
         scheduled_at = parsed_schedule.isoformat() if parsed_schedule else previous_publish.get("scheduled_at")
 
         video_path = job.output_path or str(Path("data/output") / job_id / "final_video.mp4")
+        # Older done jobs may predate automatic thumbnails; create one lazily
+        # so Postiz still receives it, without failing publish if PIL/font IO
+        # is unavailable on the host.
+        if not pipeline_data.get("thumbnail_path") or not Path(pipeline_data["thumbnail_path"]).exists():
+            try:
+                _ensure_job_thumbnail(job, pipeline_data)
+            except Exception as e_thumb:
+                logger.warning(f"Lazy thumbnail generation failed for job {job_id}: {e_thumb}")
+                pipeline_data["thumbnail_error"] = str(e_thumb)
+            job.pipeline_data = pipeline_data
+            db.commit()
         publish_info: Dict[str, Any] = {
             **previous_publish,
             "postiz_post_id": previous_publish.get("postiz_post_id"),

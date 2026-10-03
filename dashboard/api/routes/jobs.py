@@ -26,6 +26,7 @@ from dashboard.api.models import (
     StepStoryboardRequest,
     StepEffectsRequest,
     StepRenderRequest,
+    ThumbnailRequest,
     UpdateSceneSourcesRequest
 )
 from dashboard.api.database import (
@@ -393,6 +394,29 @@ def preview_job(job_id: str, db: Session = Depends(get_db)):
     if os.path.exists(os.path.join("data", final_video)):
         return {"preview_url": f"/files/{final_video}"}
     raise HTTPException(status_code=404, detail="Preview not available")
+
+@router.post("/{job_id}/thumbnail")
+def regenerate_thumbnail(
+    job_id: str,
+    request: Optional[ThumbnailRequest] = None,
+    db: Session = Depends(get_db)
+):
+    """Regenerate the review thumbnail, optionally with user-edited text."""
+    db_job = get_job(db, job_id)
+    if not db_job:
+        raise HTTPException(status_code=404, detail="Job not found")
+    try:
+        from dashboard.worker.video_tasks import regenerate_job_thumbnail
+
+        result = regenerate_job_thumbnail(
+            job_id,
+            thumbnail_text=request.thumbnail_text if request else None,
+        )
+    except Exception as e:
+        logger.exception(f"Error regenerating thumbnail for job {job_id}: {e}")
+        raise HTTPException(status_code=500, detail=f"Thumbnail generation failed: {e}")
+    return {"status": "success", "job_id": job_id, **result}
+
 
 @router.post("/{job_id}/retry")
 def retry_job(

@@ -98,6 +98,10 @@ class SceneSourcesUpdate(BaseModel):
 class UpdateSceneSourcesRequest(BaseModel):
     scenes: List[SceneSourcesUpdate]
 
+class ThumbnailRequest(BaseModel):
+    thumbnail_text: Optional[str] = None
+
+
 class ContinueRenderRequest(BaseModel):
     job_id: Optional[str] = None
 

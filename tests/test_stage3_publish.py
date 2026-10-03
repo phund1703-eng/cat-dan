@@ -155,3 +155,84 @@ def test_publish_response_without_post_id_is_failure(publish_env, monkeypatch):
     job = _get_job(TestingSession)
     assert job.status == JobStatus.publish_failed
     assert "did not include a post id" in job.pipeline_data["publish"]["error"]
+
+# ---------------------------------------------------------------------------
+# Task 3.2 — Thumbnail
+# ---------------------------------------------------------------------------
+def test_thumbnail_dimensions_and_vietnamese_text_fit(tmp_path):
+    from PIL import Image, ImageDraw
+
+    from core.render_engine.thumbnail_generator import (
+        LANDSCAPE_SIZE,
+        PORTRAIT_SIZE,
+        create_thumbnail_image,
+        generate_job_thumbnails,
+        wrap_thumbnail_text,
+        _text_bbox,
+    )
+
+    source = tmp_path / "hook.png"
+    Image.new("RGB", (640, 360), (44, 92, 145)).save(source)
+
+    result = generate_job_thumbnails(
+        tmp_path / "job-output",
+        "CƠ THỂ NGƯỜI KỲ DIỆU",
+        source_image_path=source,
+        video_format="landscape",
+    )
+
+    with Image.open(result["thumbnail_path"]) as portrait:
+        assert portrait.size == PORTRAIT_SIZE
+    with Image.open(result["thumbnail_landscape_path"]) as landscape:
+        assert landscape.size == LANDSCAPE_SIZE
+
+    text = "CƠ THỂ NGƯỜI KỲ DIỆU"
+    assert len(text) == 20
+    _normalized, lines, font, _font_size = wrap_thumbnail_text(text, size=PORTRAIT_SIZE)
+    probe_draw = ImageDraw.Draw(Image.new("RGB", PORTRAIT_SIZE))
+    usable_width = int(int(PORTRAIT_SIZE[0] * 0.88) * 0.90)
+    assert lines
+    assert all(_text_bbox(probe_draw, line, font)[0] <= usable_width for line in lines)
+
+    one = create_thumbnail_image(
+        tmp_path / "single.jpg", text, source_image_path=source, size=PORTRAIT_SIZE
+    )
+    with Image.open(one) as image:
+        assert image.size == PORTRAIT_SIZE
+        assert image.format == "JPEG"
+
+
+def test_worker_ensures_thumbnail_next_to_master(tmp_path, monkeypatch):
+    from types import SimpleNamespace
+
+    from PIL import Image
+
+    monkeypatch.chdir(tmp_path)
+    job_dir = tmp_path / "data" / "output" / "job-thumb"
+    job_dir.mkdir(parents=True)
+    source = job_dir / "snapshot.jpg"
+    Image.new("RGB", (540, 960), (120, 80, 40)).save(source)
+    video = job_dir / "final_video.mp4"
+    video.write_bytes(b"video")
+
+    job = SimpleNamespace(
+        id="job-thumb",
+        topic="Cơ thể người",
+        language="vi",
+        style="collage_broll",
+        output_path=str(video),
+        script={"title": "Cơ thể kỳ diệu", "scenes": []},
+        extra_metadata={},
+    )
+    pipeline_data = {
+        "script": job.script,
+        "metadata": {"thumbnail_text": "CƠ THỂ KỲ DIỆU"},
+        "scenes": [],
+    }
+
+    result = worker_mod._ensure_job_thumbnail(job, pipeline_data)
+
+    assert Path(result["thumbnail_path"]).exists()
+    with Image.open(result["thumbnail_path"]) as image:
+        assert image.size == (1080, 1920)
+    assert pipeline_data["thumbnail_text"] == "CƠ THỂ KỲ DIỆU"
