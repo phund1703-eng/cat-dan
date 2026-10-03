@@ -2,6 +2,8 @@
 AutoVideoFactory — Realistic Pipeline Execution Worker (Milestone 2 / Requirement R2)
 Implements 5-stage pipeline with complete audit trail and hybrid mode control:
 - Stage 1: script_ready (ScriptGenerator -> title, description, hashtags, scenes)
+- Stage 1.5: Source Gate (source_review) — scenes with numbers/claims need sources;
+  Auto jobs halt at 'source_review' until sources are supplied (Task 2.2)
 - Stage 2: voice_ready (TTSManager/VieNeu/EdgeTTS -> per-scene WAV & duration probe)
 - Stage 3: assets_ready (Art Style Presets, CascadeAssetOrchestrator/ImageGenerator, Vision Gate)
            Halts here if job.mode == 'step_by_step'
@@ -11,6 +13,7 @@ Implements 5-stage pipeline with complete audit trail and hybrid mode control:
 Provides callable entrypoints:
 - run_video_pipeline(job_id: str)
 - continue_video_pipeline(job_id: str)
+- continue_after_source_review(job_id: str)
 - regenerate_scene_asset(job_id: str, scene_index: int, prompt: str) -> dict
 - Celery task adapters (create_video_task, publish_video_task) for backward compatibility
 """
@@ -280,9 +283,13 @@ def _verify_rendered_video(video_path: str, expected_duration: float = 0.0) -> T
     return True, f"OK ({size} bytes, {info.get('width')}x{info.get('height')}, {duration:.2f}s)"
 
 
-async def _async_execute_stages_1_to_3(job_id: str):
-    """Executes Stages 1 to 3 and checks for Step-by-Step halt."""
-    from core.script_engine.script_generator import ScriptGenerator
+async def _async_execute_stages_2_and_3(job_id: str):
+    """
+    Executes Stages 2 (voice) and 3 (assets), then Stages 4/5 unless the job
+    halts at 'assets_ready' in step_by_step mode.
+    Shared by the main pipeline (after Stage 1 + Source Gate) and by the
+    source_review resume path (continue_after_source_review).
+    """
     from core.tts_engine.tts_manager import TTSManager
     from core.media_engine.cascade_asset_orchestrator import CascadeAssetOrchestrator
     from core.media_engine.image_generator import ImageGenerator
@@ -294,73 +301,7 @@ async def _async_execute_stages_1_to_3(job_id: str):
             logger.error(f"Job {job_id} not found in DB")
             return
 
-        logger.info(f"Starting realistic video pipeline for job {job_id}, topic: '{job.topic}', mode: '{job.mode}', art_style: '{job.art_style}'")
-        update_job_status(db, job_id, JobStatus.processing)
-
         pipeline_data = job.pipeline_data or {}
-
-        # -------------------------------------------------------------
-        # STAGE 1: script_ready
-        # -------------------------------------------------------------
-        logger.info(f"--- [Job {job_id}] STAGE 1: Generating Script ---")
-        script_gen = ScriptGenerator()
-        try:
-            script = await script_gen.generate(
-                topic=job.topic,
-                style=job.style or "collage_broll",
-                language=job.language or "vi",
-                duration=60
-            )
-        except Exception as e_script:
-            logger.warning(f"ScriptGenerator failed ({e_script}), using fallback script template")
-            script = script_gen._generate_fallback_script(
-                topic=job.topic,
-                style=job.style or "collage_broll",
-                language=job.language or "vi",
-                duration=30
-            )
-
-        pipeline_data["script"] = {
-            "title": script.get("title", f"Video about {job.topic}"),
-            "description": script.get("description", f"Generated video for {job.topic}"),
-            "hashtags": script.get("hashtags", ["#shorts", "#viral", "#ai"]),
-            "prompt_used": script.get("prompt_used", f"Generate a script about {job.topic}"),
-            "scenes": script.get("scenes", [])
-        }
-
-        scenes_list = []
-        raw_scenes = script.get("scenes", [])
-        for i, s in enumerate(raw_scenes):
-            scene_item = {
-                "scene_index": i,
-                "index": i,
-                "narration": s.get("narration", ""),
-                "visual_description": s.get("visual_description", ""),
-                "still_image_prompt": s.get("still_image_prompt", "") or s.get("visual_description", "") or s.get("narration", ""),
-                "duration": float(s.get("duration", 4.0))
-            }
-            for k, v in s.items():
-                if k not in scene_item:
-                    scene_item[k] = v
-            scenes_list.append(scene_item)
-        pipeline_data["scenes"] = scenes_list
-
-        update_job_output(
-            db,
-            job_id,
-            script=pipeline_data["script"],
-            meta={"title": pipeline_data["script"]["title"], "description": pipeline_data["script"]["description"]}
-        )
-        job_dir = Path("data/output") / job_id
-        job_dir.mkdir(parents=True, exist_ok=True)
-        try:
-            with open(job_dir / "script.json", "w", encoding="utf-8") as f_script:
-                json.dump(pipeline_data["script"], f_script, ensure_ascii=False, indent=2)
-        except Exception as e_sjson:
-            logger.warning(f"Could not persist script.json: {e_sjson}")
-
-        update_job_stage(db, job_id, "script_ready", status=JobStatus.processing, pipeline_data=pipeline_data)
-        logger.success(f"--- [Job {job_id}] STAGE 1 COMPLETE: script_ready ({len(scenes_list)} scenes) ---")
 
         # -------------------------------------------------------------
         # STAGE 2: voice_ready
@@ -539,6 +480,121 @@ async def _async_execute_stages_1_to_3(job_id: str):
 
         # If mode == 'auto', immediately proceed to Stages 4 and 5
         _execute_stages_4_and_5(db, job_id)
+
+    except Exception as e:
+        logger.exception(f"Unhandled error in stages 2-3 for job {job_id}: {e}")
+        update_job_stage(db, job_id, stage="failed", status=JobStatus.failed, error=str(e))
+        raise
+    finally:
+        db.close()
+
+
+async def _async_execute_stages_1_to_3(job_id: str):
+    """Executes Stages 1 to 3 and checks for Step-by-Step halt."""
+    from core.script_engine.script_generator import ScriptGenerator
+    from core.tts_engine.tts_manager import TTSManager
+    from core.media_engine.cascade_asset_orchestrator import CascadeAssetOrchestrator
+    from core.media_engine.image_generator import ImageGenerator
+
+    db = SessionLocal()
+    try:
+        job = get_job(db, job_id)
+        if not job:
+            logger.error(f"Job {job_id} not found in DB")
+            return
+
+        logger.info(f"Starting realistic video pipeline for job {job_id}, topic: '{job.topic}', mode: '{job.mode}', art_style: '{job.art_style}'")
+        update_job_status(db, job_id, JobStatus.processing)
+
+        pipeline_data = job.pipeline_data or {}
+
+        # -------------------------------------------------------------
+        # STAGE 1: script_ready
+        # -------------------------------------------------------------
+        logger.info(f"--- [Job {job_id}] STAGE 1: Generating Script ---")
+        script_gen = ScriptGenerator()
+        try:
+            script = await script_gen.generate(
+                topic=job.topic,
+                style=job.style or "collage_broll",
+                language=job.language or "vi",
+                duration=60
+            )
+        except Exception as e_script:
+            logger.warning(f"ScriptGenerator failed ({e_script}), using fallback script template")
+            script = script_gen._generate_fallback_script(
+                topic=job.topic,
+                style=job.style or "collage_broll",
+                language=job.language or "vi",
+                duration=30
+            )
+
+        pipeline_data["script"] = {
+            "title": script.get("title", f"Video about {job.topic}"),
+            "description": script.get("description", f"Generated video for {job.topic}"),
+            "hashtags": script.get("hashtags", ["#shorts", "#viral", "#ai"]),
+            "prompt_used": script.get("prompt_used", f"Generate a script about {job.topic}"),
+            "scenes": script.get("scenes", [])
+        }
+
+        scenes_list = []
+        raw_scenes = script.get("scenes", [])
+        for i, s in enumerate(raw_scenes):
+            scene_item = {
+                "scene_index": i,
+                "index": i,
+                "narration": s.get("narration", ""),
+                "visual_description": s.get("visual_description", ""),
+                "still_image_prompt": s.get("still_image_prompt", "") or s.get("visual_description", "") or s.get("narration", ""),
+                "duration": float(s.get("duration", 4.0))
+            }
+            for k, v in s.items():
+                if k not in scene_item:
+                    scene_item[k] = v
+            scenes_list.append(scene_item)
+        pipeline_data["scenes"] = scenes_list
+
+        update_job_output(
+            db,
+            job_id,
+            script=pipeline_data["script"],
+            meta={"title": pipeline_data["script"]["title"], "description": pipeline_data["script"]["description"]}
+        )
+        job_dir = Path("data/output") / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+        try:
+            with open(job_dir / "script.json", "w", encoding="utf-8") as f_script:
+                json.dump(pipeline_data["script"], f_script, ensure_ascii=False, indent=2)
+        except Exception as e_sjson:
+            logger.warning(f"Could not persist script.json: {e_sjson}")
+
+        update_job_stage(db, job_id, "script_ready", status=JobStatus.processing, pipeline_data=pipeline_data)
+        logger.success(f"--- [Job {job_id}] STAGE 1 COMPLETE: script_ready ({len(scenes_list)} scenes) ---")
+
+        # -------------------------------------------------------------
+        # STAGE 1.5: SOURCE GATE (Task 2.2) — kiểm chứng nguồn trước voice
+        # -------------------------------------------------------------
+        from core.script_engine.source_gate import evaluate_gate
+
+        pipeline_data["script_origin"] = script.get("script_origin", "gemini")
+        try:
+            gate = await asyncio.to_thread(evaluate_gate, pipeline_data["scenes"])
+        except Exception as e_gate:
+            logger.warning(f"Source Gate failed for job {job_id} ({e_gate}); continuing without audit")
+            gate = {"audit": [], "blocking": [], "has_blocking": False}
+        pipeline_data["source_audit"] = gate["audit"]
+        update_job_stage(db, job_id, "script_ready", status=JobStatus.processing, pipeline_data=pipeline_data)
+
+        if getattr(job, "mode", "auto") == "auto" and gate["has_blocking"]:
+            update_job_stage(db, job_id, "source_review", status=JobStatus.processing, pipeline_data=pipeline_data)
+            logger.warning(
+                f"⛔ [Job {job_id}] Source Gate halted at 'source_review': "
+                f"scenes {gate['blocking']} need sources before voice/render."
+            )
+            return
+
+        # Stages 2-5 (voice, assets, render) — shared with the source_review resume path
+        await _async_execute_stages_2_and_3(job_id)
 
     except Exception as e:
         logger.exception(f"Unhandled error in video pipeline for job {job_id}: {e}")
@@ -853,6 +909,42 @@ def continue_video_pipeline(job_id: str):
         update_job_stage(db, job_id, stage="failed", status=JobStatus.failed, error=str(e))
     finally:
         db.close()
+
+
+def continue_after_source_review(job_id: str) -> dict:
+    """
+    Resumes a job halted at stage 'source_review' (Source Gate, Task 2.2).
+
+    Re-audits scenes (the user may have added sources via the API in the
+    meantime). If scenes are still missing sources, the job stays at
+    'source_review' with a refreshed audit; otherwise Stages 2-5 run.
+    Returns {"status": "resumed"|"blocked", ...}.
+    """
+    from core.script_engine.source_gate import evaluate_gate
+
+    db = SessionLocal()
+    try:
+        job = get_job(db, job_id)
+        if not job:
+            raise ValueError(f"Job {job_id} not found in DB")
+
+        pipeline_data = job.pipeline_data or {}
+        scenes = pipeline_data.get("scenes") or pipeline_data.get("script", {}).get("scenes", [])
+        gate = evaluate_gate(scenes)
+        pipeline_data["source_audit"] = gate["audit"]
+
+        if gate["has_blocking"]:
+            update_job_stage(db, job_id, "source_review", status=JobStatus.processing, pipeline_data=pipeline_data)
+            logger.warning(f"⛔ [Job {job_id}] Still blocked at 'source_review': scenes {gate['blocking']} need sources.")
+            return {"status": "blocked", "job_id": job_id, "blocking_scenes": gate["blocking"], "source_audit": gate["audit"]}
+
+        update_job_stage(db, job_id, "script_ready", status=JobStatus.processing, pipeline_data=pipeline_data)
+        logger.success(f"✅ [Job {job_id}] Source Gate passed; resuming stages 2-5.")
+    finally:
+        db.close()
+
+    run_in_async_loop(_async_execute_stages_2_and_3(job_id))
+    return {"status": "resumed", "job_id": job_id, "source_audit": gate["audit"]}
 
 
 def regenerate_scene_asset(job_id: str, scene_index: int, prompt: str) -> dict:

@@ -290,6 +290,7 @@ c_meta4.metric("Giọng Đọc", voice_preset)
 stages_map = {
     "pending": (0.05, "⏳ Đang khởi tạo..."),
     "script_ready": (0.25, "📝 Kịch Bản đã sẵn sàng (Bước 1 hoàn tất)"),
+    "source_review": (0.30, "⛔ Đang chờ bổ sung nguồn trích dẫn (Source Review)"),
     "voice_ready": (0.50, "🎙️ Âm Thanh VieNeu-TTS đã hoàn thành (Bước 2 hoàn tất)"),
     "assets_ready": (0.75, "🖼️ Storyboard & Vision Gate đã duyệt" if mode == "auto" else "⏸️ Chờ duyệt Storyboard (Step-by-Step Studio)"),
     "rendering": (0.90, "🎬 Đang tổng hợp hiệu ứng Ken Burns, ASS & render video..."),
@@ -324,6 +325,66 @@ if stage == "failed":
                 st.error(f"Lỗi: {r_retry.text}")
         except Exception as ex:
             st.error(f"Lỗi kết nối: {ex}")
+
+# ---------------------------------------------------------------------------
+# Source Review Gate (Task 2.2): job đang dừng chờ bổ sung nguồn trích dẫn
+# ---------------------------------------------------------------------------
+if stage == "source_review":
+    _audit = pipeline_data.get("source_audit") or []
+    _blocking = [a for a in _audit if a.get("status") == "needs_source"]
+    _scenes_by_idx = {}
+    for _sc in pipeline_data.get("scenes") or []:
+        _i = _sc.get("scene_index", _sc.get("index"))
+        if _i is not None:
+            _scenes_by_idx[int(_i)] = _sc
+    st.warning(
+        f"⛔ **Dừng ở bước Duyệt Nguồn (Source Review):** còn {len(_blocking)} cảnh có số liệu "
+        "nhưng chưa có nguồn trích dẫn. Hãy bổ sung URL nguồn cho từng cảnh rồi bấm tiếp tục."
+    )
+    for _a in _blocking:
+        _idx = int(_a.get("scene_index", 0))
+        _sc = _scenes_by_idx.get(_idx, {})
+        st.markdown(f"**Cảnh #{_idx + 1}** — Fact: {_a.get('fact') or _sc.get('fact', '')}")
+        if _sc.get("narration"):
+            st.caption(f"Lời thoại: {_sc.get('narration')}")
+        st.text_input("URL nguồn (https://...)", key=f"src_url_{selected_job_id}_{_idx}")
+        st.text_input("Tiêu đề nguồn", key=f"src_title_{selected_job_id}_{_idx}")
+        st.text_input("Tổ chức xuất bản (publisher)", key=f"src_pub_{selected_job_id}_{_idx}")
+    if st.button("📚 Lưu Nguồn & ▶️ Tiếp Tục Sản Xuất", type="primary", key=f"btn_source_continue_{selected_job_id}"):
+        _updates = []
+        for _a in _blocking:
+            _idx = int(_a.get("scene_index", 0))
+            _url = str(st.session_state.get(f"src_url_{selected_job_id}_{_idx}", "")).strip()
+            if _url:
+                _updates.append({
+                    "scene_index": _idx,
+                    "sources": [{
+                        "title": str(st.session_state.get(f"src_title_{selected_job_id}_{_idx}", "")).strip(),
+                        "url": _url,
+                        "publisher": str(st.session_state.get(f"src_pub_{selected_job_id}_{_idx}", "")).strip(),
+                        "accessed_date": "",
+                    }],
+                })
+        if not _updates:
+            st.error("Anh chưa nhập URL nguồn nào cho các cảnh thiếu nguồn.")
+        else:
+            try:
+                r_src = requests.post(
+                    f"{API_URL}/jobs/{selected_job_id}/step/sources",
+                    json={"scenes": _updates},
+                    timeout=15.0,
+                )
+                if r_src.status_code != 200:
+                    st.error(f"Lỗi lưu nguồn: {r_src.text}")
+                else:
+                    r_cont = requests.post(f"{API_URL}/jobs/{selected_job_id}/continue-source-review", timeout=15.0)
+                    if r_cont.status_code == 200:
+                        st.success("✅ Đã lưu nguồn, hệ thống đang tiếp tục sản xuất!")
+                        st.rerun()
+                    else:
+                        st.error(f"Lỗi tiếp tục: {r_cont.text}")
+            except Exception as ex:
+                st.error(f"Lỗi kết nối: {ex}")
 
 # =============================================================================
 # 5 Functional Tabs (Interactive 5-Stage Studio)

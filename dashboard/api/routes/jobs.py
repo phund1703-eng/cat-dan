@@ -25,7 +25,8 @@ from dashboard.api.models import (
     VoiceSceneRequest,
     StepStoryboardRequest,
     StepEffectsRequest,
-    StepRenderRequest
+    StepRenderRequest,
+    UpdateSceneSourcesRequest
 )
 from dashboard.api.database import (
     get_db,
@@ -154,6 +155,21 @@ def _execute_continue_pipeline(job_id: str):
             update_job_stage(db, job_id, stage="failed", status=JobStatus.failed, error=str(e))
         finally:
             db.close()
+
+def _execute_continue_source_review(job_id: str):
+    """Re-audits sources and resumes the pipeline after source_review."""
+    try:
+        from dashboard.worker.video_tasks import continue_after_source_review
+        result = continue_after_source_review(job_id)
+        logger.info(f"continue_after_source_review({job_id}) -> {result.get('status')}")
+    except Exception as e:
+        logger.exception(f"Unhandled error in continue_after_source_review for job {job_id}: {e}")
+        db = SessionLocal()
+        try:
+            update_job_stage(db, job_id, stage="failed", status=JobStatus.failed, error=str(e))
+        finally:
+            db.close()
+
 
 def _execute_publish(job_id: str, platforms: list, schedule_time: Optional[str] = None):
     """Executes publish task in background without Celery."""
@@ -467,6 +483,9 @@ async def step_generate_script(
             "still_image_prompt": s.get("still_image_prompt", s.get("visual_description", "")),
             "duration": float(s.get("duration", 4.0))
         }
+        for k, v in s.items():
+            if k not in scene_item:
+                scene_item[k] = v
         scenes_list.append(scene_item)
     p_data["scenes"] = scenes_list
 
@@ -1205,6 +1224,74 @@ def continue_render(
     background_tasks.add_task(_execute_continue_pipeline, job_id)
 
     return convert_db_to_response(db_job)
+
+@router.post("/{job_id}/step/sources", response_model=JobResponse)
+def update_scene_sources(
+    job_id: str,
+    request: UpdateSceneSourcesRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Source Review: user supplies/edits `sources` (+ optional `fact`) per scene
+    while the job is halted at stage 'source_review' (Task 2.2).
+    Updates pipeline_data['scenes'] and pipeline_data['script']['scenes'] without
+    changing the stage; the job resumes via /continue-source-review.
+    """
+    db_job = get_job(db, job_id)
+    if not db_job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    p_data = db_job.pipeline_data or {}
+    updates = {int(u.scene_index): u for u in request.scenes}
+
+    def _apply(scene_list: list) -> list:
+        for sc in scene_list or []:
+            if not isinstance(sc, dict):
+                continue
+            idx = sc.get("scene_index", sc.get("index"))
+            if idx is None:
+                continue
+            upd = updates.get(int(idx))
+            if upd is None:
+                continue
+            sc["sources"] = [s.model_dump() for s in upd.sources]
+            if upd.fact is not None:
+                sc["fact"] = upd.fact
+        return scene_list
+
+    p_data["scenes"] = _apply(p_data.get("scenes") or [])
+    if isinstance(p_data.get("script"), dict):
+        p_data["script"]["scenes"] = _apply(p_data["script"].get("scenes") or [])
+        job_dir = Path("data/output") / job_id
+        job_dir.mkdir(parents=True, exist_ok=True)
+        with open(job_dir / "script.json", "w", encoding="utf-8") as f:
+            json.dump(p_data["script"], f, ensure_ascii=False, indent=2)
+
+    db_job = update_job_stage(db, job_id, stage=db_job.stage or "source_review", pipeline_data=p_data)
+    return convert_db_to_response(db_job)
+
+
+@router.post("/{job_id}/continue-source-review", response_model=JobResponse)
+def continue_source_review(
+    job_id: str,
+    background_tasks: BackgroundTasks,
+    request: Optional[ContinueRenderRequest] = None,
+    db: Session = Depends(get_db)
+):
+    """Resume a job halted at 'source_review' after sources were supplied."""
+    db_job = get_job(db, job_id)
+    if not db_job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if db_job.stage != "source_review":
+        raise HTTPException(
+            status_code=400,
+            detail=f"Cannot continue source review: Job is in stage '{db_job.stage}', expected 'source_review'"
+        )
+
+    background_tasks.add_task(_execute_continue_source_review, job_id)
+    return convert_db_to_response(db_job)
+
 
 @router.get("/{job_id}/export-zip")
 def export_job_zip(job_id: str, db: Session = Depends(get_db)):

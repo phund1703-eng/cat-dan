@@ -87,6 +87,15 @@ class RegenerateSceneRequest(BaseModel):
     scene_index: int = Field(..., ge=0)
     prompt: str
 
+class SceneSourcesUpdate(BaseModel):
+    """User-supplied sources for one scene while a job sits at source_review."""
+    scene_index: int = Field(..., ge=0)
+    fact: Optional[str] = None
+    sources: List[SourceRef] = Field(default_factory=list)
+
+class UpdateSceneSourcesRequest(BaseModel):
+    scenes: List[SceneSourcesUpdate]
+
 class ContinueRenderRequest(BaseModel):
     job_id: Optional[str] = None
 
