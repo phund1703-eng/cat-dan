@@ -131,22 +131,6 @@ def convert_db_to_response(db_job) -> Optional[JobResponse]:
         pipeline_data=db_job.pipeline_data
     )
 
-def _execute_pipeline(job_id: str):
-    """Executes the video pipeline in the background using FastAPI BackgroundTasks."""
-    try:
-        from dashboard.worker.video_tasks import run_video_pipeline
-        run_video_pipeline(job_id)
-    except (ImportError, AttributeError):
-        logger.info(f"run_video_pipeline not found in worker, using fallback for job {job_id}")
-        _fallback_run_video_pipeline(job_id)
-    except Exception as e:
-        logger.exception(f"Unhandled error in video pipeline for job {job_id}: {e}")
-        db = SessionLocal()
-        try:
-            update_job_stage(db, job_id, stage="failed", status=JobStatus.failed, error=str(e))
-        finally:
-            db.close()
-
 def _execute_continue_pipeline(job_id: str):
     """Continues rendering after step-by-step approval."""
     try:
@@ -190,91 +174,6 @@ def _execute_publish(job_id: str, platforms: list, schedule_time: Optional[str] 
         # never overwrites the render pipeline's generic `failed` state here.
         logger.exception(f"Error invoking publisher for job {job_id}: {e}")
         return {"status": "publish_failed", "job_id": job_id, "error": str(e)}
-
-def _fallback_run_video_pipeline(job_id: str):
-    """Fallback pipeline when worker is not yet upgraded to realistic pipeline."""
-    db = SessionLocal()
-    try:
-        job = get_job(db, job_id)
-        if not job:
-            logger.error(f"Job {job_id} not found in fallback pipeline")
-            return
-
-        logger.info(f"Running fallback pipeline for job {job_id}, mode={job.mode}")
-        update_job_stage(db, job_id, stage="script_ready", status=JobStatus.processing)
-
-        job_dir = os.path.join("data", "output", job_id)
-        img_dir = os.path.join(job_dir, "images")
-        audio_dir = os.path.join(job_dir, "audio")
-        os.makedirs(img_dir, exist_ok=True)
-        os.makedirs(audio_dir, exist_ok=True)
-
-        img_path = os.path.join(img_dir, "scene_0.png").replace("\\", "/")
-        audio_path = os.path.join(audio_dir, "scene_0.wav").replace("\\", "/")
-
-        if not os.path.exists(img_path):
-            with open(img_path, "wb") as f:
-                f.write(b"MOCK_IMAGE_DATA")
-        if not os.path.exists(audio_path):
-            with open(audio_path, "wb") as f:
-                f.write(b"MOCK_AUDIO_DATA")
-
-        p_data = {
-            "script": {
-                "title": f"Video about {job.topic}",
-                "description": f"Generated video for {job.topic}",
-                "hashtags": ["#shorts", "#viral", "#ai"],
-                "prompt_used": f"Generate a script about {job.topic}",
-                "scenes": [
-                    {
-                        "index": 0,
-                        "narration": f"Chào bạn đến với video về {job.topic}.",
-                        "visual_description": f"Khung cảnh khởi đầu về {job.topic}",
-                        "still_image_prompt": f"{job.art_style} style image representing {job.topic}",
-                        "duration": 4.0
-                    }
-                ]
-            },
-            "voice": {
-                "engine": "VieNeu-TTS",
-                "preset": job.voice_preset or "default",
-                "scenes": [
-                    {
-                        "scene_index": 0,
-                        "text": f"Chào bạn đến với video về {job.topic}.",
-                        "audio_path": audio_path,
-                        "duration": 4.0
-                    }
-                ]
-            },
-            "storyboard": [
-                {
-                    "scene_index": 0,
-                    "image_path": img_path,
-                    "visual_prompt": f"{job.art_style} style image representing {job.topic}",
-                    "tier_used": "tier1_imagen",
-                    "vision_gate_score": 0.92,
-                    "vision_gate_reasoning": "High visual relevance and aesthetic alignment"
-                }
-            ],
-            "ffmpeg_commands": [
-                f"ffmpeg -y -loop 1 -i {img_path} -i {audio_path} -c:v libx264 -pix_fmt yuv420p -shortest {job_dir}/final_video.mp4"
-            ]
-        }
-
-        update_job_stage(db, job_id, stage="voice_ready", status=JobStatus.processing, pipeline_data=p_data)
-        update_job_stage(db, job_id, stage="assets_ready", status=JobStatus.processing, pipeline_data=p_data)
-
-        if job.mode == "step_by_step":
-            logger.info(f"Job {job_id} paused at assets_ready (step_by_step mode)")
-            return
-
-        _fallback_continue_pipeline(job_id)
-    except Exception as e:
-        logger.exception(f"Error in fallback pipeline: {e}")
-        update_job_stage(db, job_id, stage="failed", status=JobStatus.failed, error=str(e))
-    finally:
-        db.close()
 
 def _fallback_continue_pipeline(job_id: str):
     """Fallback continue pipeline for rendering and done stages."""
@@ -329,9 +228,8 @@ def create_new_job(
         stage="pending"
     )
 
-    # Queue background task using native FastAPI BackgroundTasks (no Celery/Redis)
-    background_tasks.add_task(_execute_pipeline, job_id)
-
+    # API chỉ tạo job (status 'pending'); worker bền
+    # `python -m dashboard.worker.runner` sẽ poll DB và thực thi (Task 4.1).
     return convert_db_to_response(db_job)
 
 @router.get("", response_model=List[JobResponse])
@@ -505,7 +403,8 @@ def retry_job(
     if not db_job:
         raise HTTPException(status_code=404, detail="Job not found")
     update_job_stage(db, job_id, stage="pending", status=JobStatus.pending, error=None)
-    background_tasks.add_task(_execute_pipeline, job_id)
+    # Đưa job về 'pending'; worker bền (dashboard.worker.runner) sẽ nhận
+    # chạy lại — API không tự thực thi pipeline nữa (Task 4.1).
     return {"status": "retrying", "job_id": job_id}
 
 # -----------------------------------------------------------------------------

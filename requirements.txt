@@ -48,9 +48,9 @@ plotly>=5.22.0                 # Charts
 pandas>=2.2.0
 
 # ===== Job Queue =====
-celery>=5.4.0
-redis>=5.0.0
-flower>=2.0.1                  # Celery monitoring
+# (Task 4.1) Celery/Redis đã loại bỏ — hàng đợi bền là worker riêng
+# `python -m dashboard.worker.runner` poll DB. Xem requirements-optional.txt
+# nếu cần lại Celery/Redis/Flower/Manim.
 
 # ===== Social Media Publishing =====
 google-api-python-client>=2.133.0  # YouTube API
@@ -58,7 +58,8 @@ google-auth>=2.29.0
 google-auth-oauthlib>=1.2.0
 
 # ===== Animation (Manim) =====
-manim>=0.18.0                  # Sẽ cài sau cùng vì có nhiều dependencies
+# (Task 4.1) Đã chuyển sang requirements-optional.txt — chỉ cài khi làm
+# style whiteboard bằng Manim.
 
 # ===== Utilities =====
 apscheduler>=3.10.4            # Job scheduling

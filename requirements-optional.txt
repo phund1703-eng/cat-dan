@@ -1,0 +1,14 @@
+# AutoVideoFactory — Optional Dependencies
+# Cài thêm khi thật sự cần: pip install -r requirements-optional.txt
+# (Tách khỏi requirements.txt ở Task 4.1 để install.bat nhẹ, ít lỗi.)
+
+# ===== Hàng đợi Celery/Redis (đã thay bằng dashboard.worker.runner) =====
+# Chỉ cài lại nếu muốn quay về mô hình Celery; code hiện tại không dùng.
+celery>=5.4.0
+redis>=5.0.0
+flower>=2.0.1                  # Celery monitoring
+
+# ===== Animation (Manim) =====
+# Chỉ cần khi cài thật style whiteboard bằng Manim; dependencies nặng
+# (Cairo/Pango/FFmpeg dev libs) nên để cài sau cùng, tách riêng.
+manim>=0.18.0

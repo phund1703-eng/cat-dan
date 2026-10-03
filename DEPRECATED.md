@@ -14,3 +14,12 @@
 | `scripts/produce_universal_collage_videos.py` | Wrapper mỏng → canonical (giữ `produce_universal_videos`, `VIDEOS_CONFIG`) |
 | `prepare_human_body_assets.py` | Shim thư viện → `core/media_engine/human_body_assets.py` |
 | `pipeline.py` | Cài đặt gốc (`VideoFactory`); CLI đã chuyển qua canonical |
+
+## Hàng đợi bền (Task 4.1)
+
+| Hạng mục cũ | Trạng thái |
+|---|---|
+| `dashboard/worker/celery_app.py` | **Đã xoá** — thay bằng worker poll DB `python -m dashboard.worker.runner` (`dashboard/worker/runner.py`) |
+| `create_video_task` / `publish_video_task` (Celery tasks) | Adapter thường giữ tương thích ngược, ủy quyền `resume_video_pipeline` / `publish_video` |
+| `celery`, `redis`, `flower`, `manim` trong `requirements.txt` | Chuyển sang `requirements-optional.txt` |
+| API tự chạy pipeline bằng FastAPI `BackgroundTasks` khi tạo/retry job | Đã bỏ — API chỉ tạo job `pending`, worker mới thực thi; job dở dang được resume từ stage đã lưu |

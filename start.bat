@@ -25,24 +25,15 @@ if not exist ".env" (
 echo Đang khởi động các dịch vụ...
 echo.
 
-:: Khởi động Redis (nếu có Docker)
-echo [1/3] Kiểm tra Redis...
-redis-cli ping >nul 2>&1
-if errorlevel 1 (
-    echo ⚠️  Redis chưa chạy - Celery worker sẽ không hoạt động
-    echo    Cài Redis: https://github.com/microsoftarchive/redis/releases
-) else (
-    echo ✅ Redis đang chạy
-)
-
-:: Khởi động Celery Worker (background)
-echo [2/3] Khởi động Celery Worker...
-start /b "Celery Worker" cmd /c "venv\Scripts\activate && celery -A dashboard.worker.celery_app worker --loglevel=info --logfile=logs\celery.log 2>&1"
+:: Khởi động Video Worker bền (poll DB, thay Celery/Redis — Task 4.1)
+echo [1/2] Khởi động Video Worker...
+if not exist "logs" mkdir logs
+start /b "Video Worker" cmd /c "venv\Scripts\activate && python -m dashboard.worker.runner > logs\worker.log 2>&1"
 timeout /t 2 /nobreak >nul
-echo ✅ Celery Worker đã khởi động
+echo ✅ Video Worker đã khởi động (xem logs\worker.log)
 
 :: Khởi động FastAPI Backend (background)
-echo [3/3] Khởi động API Backend...
+echo [2/2] Khởi động API Backend...
 start /b "API Backend" cmd /c "venv\Scripts\activate && uvicorn dashboard.api.main:app --host 0.0.0.0 --port 8000 --reload 2>&1 | python -c \"import sys; [print(line, end='') for line in sys.stdin]\" > logs\api.log 2>&1"
 timeout /t 2 /nobreak >nul
 echo ✅ API Backend đã khởi động tại http://localhost:8000

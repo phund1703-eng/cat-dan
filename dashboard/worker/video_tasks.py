@@ -10,12 +10,15 @@ Implements 5-stage pipeline with complete audit trail and hybrid mode control:
 - Stage 4: rendering (SubtitleGenerator dynamic chunked ASS, FFmpeg zoompan/mux commands)
 - Stage 5: done (FFmpeg render / synthetic MP4, snapshot.jpg extraction, status=done)
 
-Provides callable entrypoints:
+- Provides callable entrypoints:
 - run_video_pipeline(job_id: str)
+- resume_video_pipeline(job_id: str) — durable dispatch used by the DB worker
 - continue_video_pipeline(job_id: str)
 - continue_after_source_review(job_id: str)
 - regenerate_scene_asset(job_id: str, scene_index: int, prompt: str) -> dict
-- Celery task adapters (create_video_task, publish_video_task) for backward compatibility
+- Plain task adapters (create_video_task, publish_video_task) kept for
+  backward compatibility (Celery/Redis removed in Task 4.1; the durable
+  queue is dashboard/worker/runner.py polling the DB)
 """
 
 import os
@@ -46,18 +49,10 @@ from dashboard.api.database import (
 from dashboard.api.models import JobStatus
 from publish.postiz_client.postiz_api import PostizClient
 
-# Safe Celery app import for backward compatibility
-try:
-    from dashboard.worker.celery_app import app
-except Exception:
-    class _DummyCeleryApp:
-        def task(self, *args, **kwargs):
-            def decorator(f):
-                f.delay = f
-                f.run = f
-                return f
-            return decorator
-    app = _DummyCeleryApp()
+# NOTE (Task 4.1): Celery/Redis đã bị loại bỏ. Hàng đợi bền là tiến trình
+# worker riêng `python -m dashboard.worker.runner` poll DB; hai hàm
+# create_video_task / publish_video_task ở cuối file chỉ còn là adapter
+# thường giữ tương thích ngược cho code cũ.
 
 # Ensure FFmpeg is available on PATH (e.g. from imageio_ffmpeg on Windows)
 def _ensure_ffmpeg_on_path() -> None:
@@ -442,7 +437,12 @@ async def _async_execute_stages_2_and_3(job_id: str):
             narration = scene.get("narration", "").strip() or f"Cảnh {i+1} về {job.topic}"
 
             synthesized = False
-            if ref_audio:
+            if audio_path.exists() and audio_path.stat().st_size > 0:
+                # Resume sau khi worker bị tắt giữa chừng: audio đã có trên
+                # đĩa thì dùng lại, không tổng hợp lại (Task 4.1).
+                logger.info(f"Scene {i}: reusing existing audio artifact {audio_path}")
+                synthesized = True
+            if ref_audio and not synthesized:
                 try:
                     await tts_mgr.vieneu_client.synthesize(
                         text=narration,
@@ -517,35 +517,48 @@ async def _async_execute_stages_2_and_3(job_id: str):
             gate_reason = "Offline visual verification pass"
 
             target_obj = scene.get("focal_keyword") or scene.get("secondary_keyword") or job.topic
-            try:
-                acquired_path, meta = await cascade.acquire_asset(
-                    target_object=target_obj,
-                    scene_sentence=scene.get("narration", ""),
-                    archetype=art_style_key,
-                    job_cache_dir=img_dir
-                )
-                if acquired_path and os.path.exists(acquired_path):
-                    _ensure_scene_composite(acquired_path, str(img_dest), art_style=art_style_key)
-                    tier_used = meta.get("tier_used", "tier1_imagen")
-                    gate_score = float(meta.get("confidence", 0.90))
-                    gate_reason = meta.get("reason", "Cascade asset acquisition verified")
-            except Exception as e_casc:
-                logger.warning(f"Cascade acquisition failed for scene {i} ({e_casc}), trying ImageGenerator")
+            reuse_image = img_dest.exists() and img_dest.stat().st_size > 0
+            if reuse_image:
+                # Resume sau khi worker bị tắt giữa chừng: ảnh đã có trên đĩa
+                # thì dùng lại, không sinh/tải lại (Task 4.1).
+                logger.info(f"Scene {i}: reusing existing image artifact {img_dest}")
+                tier_used = scene.get("tier_used", tier_used)
                 try:
-                    await img_gen.generate_scene_image(scene, str(img_dest), topic=job.topic, scene_index=i)
-                    tier_used = "tier2_stock"
-                    gate_score = 0.88
-                    gate_reason = "ImageGenerator generation pass"
-                except Exception as e_ig:
-                    logger.warning(f"ImageGenerator failed for scene {i} ({e_ig}), fallback to collage generator")
-                    img_gen._generate_artistic_collage_fallback(scene, i, str(img_dest))
-                    tier_used = "tier4_procedural"
-                    gate_score = 0.85
-                    gate_reason = "Procedural artistic collage fallback"
+                    gate_score = float(scene.get("vision_gate_score") or gate_score)
+                except (TypeError, ValueError):
+                    pass
+                gate_reason = scene.get("vision_gate_reasoning") or gate_reason
+            else:
+                try:
+                    acquired_path, meta = await cascade.acquire_asset(
+                        target_object=target_obj,
+                        scene_sentence=scene.get("narration", ""),
+                        archetype=art_style_key,
+                        job_cache_dir=img_dir
+                    )
+                    if acquired_path and os.path.exists(acquired_path):
+                        _ensure_scene_composite(acquired_path, str(img_dest), art_style=art_style_key)
+                        tier_used = meta.get("tier_used", "tier1_imagen")
+                        gate_score = float(meta.get("confidence", 0.90))
+                        gate_reason = meta.get("reason", "Cascade asset acquisition verified")
+                except Exception as e_casc:
+                    logger.warning(f"Cascade acquisition failed for scene {i} ({e_casc}), trying ImageGenerator")
+                    try:
+                        await img_gen.generate_scene_image(scene, str(img_dest), topic=job.topic, scene_index=i)
+                        tier_used = "tier2_stock"
+                        gate_score = 0.88
+                        gate_reason = "ImageGenerator generation pass"
+                    except Exception as e_ig:
+                        logger.warning(f"ImageGenerator failed for scene {i} ({e_ig}), fallback to collage generator")
+                        img_gen._generate_artistic_collage_fallback(scene, i, str(img_dest))
+                        tier_used = "tier4_procedural"
+                        gate_score = 0.85
+                        gate_reason = "Procedural artistic collage fallback"
 
-            # Optional live Vision Gate evaluation
+            # Optional live Vision Gate evaluation (bỏ qua khi đang reuse
+            # artifact lúc resume — không gọi mạng thừa, Task 4.1)
             try:
-                if os.path.exists(str(img_dest)):
+                if not reuse_image and os.path.exists(str(img_dest)):
                     gate_eval = await cascade.evaluate_vision_gate(
                         image=str(img_dest),
                         scene_sentence=scene.get("narration", ""),
@@ -1064,6 +1077,76 @@ def continue_after_source_review(job_id: str) -> dict:
     return {"status": "resumed", "job_id": job_id, "source_audit": gate["audit"]}
 
 
+# Stages không được tự chạy tiếp: cần thao tác của người dùng trước.
+_WAITING_STAGES = {"source_review"}
+# Status đã kết thúc vòng đời tạo video — worker không đụng vào.
+_TERMINAL_STATUSES = {
+    JobStatus.done.value,
+    JobStatus.failed.value,
+    JobStatus.approved.value,
+    JobStatus.scheduled.value,
+    JobStatus.published.value,
+    JobStatus.publish_failed.value,
+    JobStatus.rejected.value,
+}
+
+
+def resume_video_pipeline(job_id: str) -> Dict[str, Any]:
+    """
+    Điểm vào duy nhất của hàng đợi bền (dashboard.worker.runner, Task 4.1).
+
+    Chạy tiếp job từ đúng stage đã lưu trong DB sau khi worker/API bị tắt
+    giữa chừng; artifact đã xong trên đĩa (audio/ảnh từng scene) được các
+    stage tự dùng lại. Tôn trọng điểm dừng duyệt:
+    - stage 'source_review' -> chờ anh bổ sung nguồn (continue-source-review).
+    - stage 'assets_ready' + mode 'step_by_step' -> chờ duyệt storyboard.
+    Job ở trạng thái cuối (done/failed/approved/scheduled/published...)
+    không bị đụng vào.
+
+    Trả {"job_id", "action": "ran"|"waiting"|"skipped", "stage", ...}.
+    """
+    db = SessionLocal()
+    try:
+        job = get_job(db, job_id)
+        if not job:
+            return {"job_id": job_id, "action": "skipped", "reason": "job_not_found"}
+        stage = (job.stage or "pending").strip() or "pending"
+        status = job.status.value if hasattr(job.status, "value") else str(job.status)
+        mode = getattr(job, "mode", "auto") or "auto"
+    finally:
+        db.close()
+
+    if status in _TERMINAL_STATUSES:
+        return {"job_id": job_id, "action": "skipped", "stage": stage, "reason": f"terminal_status:{status}"}
+    if stage in _WAITING_STAGES:
+        return {"job_id": job_id, "action": "waiting", "stage": stage, "reason": "needs_user_action"}
+    if stage == "assets_ready" and mode == "step_by_step":
+        return {"job_id": job_id, "action": "waiting", "stage": stage, "reason": "step_by_step_review"}
+
+    if stage in ("assets_ready", "rendering"):
+        logger.info(f"🔁 [Job {job_id}] Resume từ stage '{stage}' -> Stages 4-5")
+        continue_video_pipeline(job_id)
+        return {"job_id": job_id, "action": "ran", "stage": stage, "ran_stages": "4-5"}
+
+    if stage == "script_ready" and mode == "auto":
+        # Script xong nhưng voice chưa chạy: kiểm lại Source Gate trước khi
+        # đi tiếp (dùng chung đường resume của source_review).
+        logger.info(f"🔁 [Job {job_id}] Resume từ stage 'script_ready' -> Source Gate + Stages 2-5")
+        result = continue_after_source_review(job_id)
+        action = "waiting" if result.get("status") == "blocked" else "ran"
+        return {"job_id": job_id, "action": action, "stage": stage, "ran_stages": "gate+2-5"}
+
+    if stage in ("script_ready", "voice_ready"):
+        logger.info(f"🔁 [Job {job_id}] Resume từ stage '{stage}' -> Stages 2-3")
+        run_in_async_loop(_async_execute_stages_2_and_3(job_id))
+        return {"job_id": job_id, "action": "ran", "stage": stage, "ran_stages": "2-3"}
+
+    # 'pending' hoặc stage lạ/chưa bắt đầu: chạy toàn bộ pipeline từ đầu.
+    logger.info(f"🔁 [Job {job_id}] Resume từ stage '{stage}' -> full pipeline")
+    run_video_pipeline(job_id)
+    return {"job_id": job_id, "action": "ran", "stage": stage, "ran_stages": "1-5"}
+
+
 def regenerate_scene_asset(job_id: str, scene_index: int, prompt: str) -> dict:
     """
     Regenerates the visual asset for a specific scene index with a new prompt.
@@ -1225,10 +1308,13 @@ def regenerate_scene_asset(job_id: str, scene_index: int, prompt: str) -> dict:
         db.close()
 
 
-@app.task(name="dashboard.worker.video_tasks.create_video_task", bind=True)
-def create_video_task(self, job_id: str):
-    """Celery task adapter delegating to native pipeline."""
-    return run_video_pipeline(job_id)
+def create_video_task(job_id: str):
+    """Adapter giữ tương thích ngược (Celery đã gỡ ở Task 4.1).
+
+    Trước đây là Celery task; nay chỉ ủy quyền cho điểm vào bền
+    resume_video_pipeline để mọi đường chạy đều qua một dispatch duy nhất.
+    """
+    return resume_video_pipeline(job_id)
 
 
 def _parse_schedule_time(schedule_time: Union[str, datetime, None]) -> Optional[datetime]:
@@ -1476,7 +1562,6 @@ def run_due_publish_jobs(now: Optional[datetime] = None) -> list[Dict[str, Any]]
     return results
 
 
-@app.task(name="dashboard.worker.video_tasks.publish_video_task")
 def publish_video_task(job_id: str, platforms: list, schedule_time: str = None):
-    """Celery-compatible adapter delegating to the native Postiz publisher."""
+    """Adapter giữ tương thích ngược (Celery đã gỡ ở Task 4.1)."""
     return publish_video(job_id, platforms, schedule_time)
