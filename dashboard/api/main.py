@@ -39,7 +39,23 @@ app.include_router(channels.router, prefix="/channels", tags=["Channels"])
 async def startup_event():
     logger.info("Starting up AutoVideoFactory API")
     create_tables()
+    try:
+        from dashboard.api.publish_scheduler import start_publish_scheduler
+
+        app.state.publish_scheduler = start_publish_scheduler()
+    except Exception as exc:
+        logger.warning(f"Publish scheduler startup skipped: {exc}")
+        app.state.publish_scheduler = None
     logger.info("Database tables initialized")
+
+@app.on_event("shutdown")
+async def shutdown_event():
+    try:
+        from dashboard.api.publish_scheduler import shutdown_publish_scheduler
+
+        shutdown_publish_scheduler()
+    except Exception as exc:
+        logger.warning(f"Publish scheduler shutdown skipped: {exc}")
 
 @app.get("/health")
 def health_check():

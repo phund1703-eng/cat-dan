@@ -1046,6 +1046,12 @@ with tab_master:
 
     with col_pub:
         st.markdown("### 🚀 Phê Duyệt & Xuất Bản")
+        publish_info = pipeline_data.get("publish") or {}
+        if publish_info.get("scheduled_at"):
+            st.info(
+                f"📅 Trạng thái publish: **{publish_info.get('status', 'scheduled')}** · "
+                f"Giờ đăng dự kiến: **{publish_info['scheduled_at']}**"
+            )
         with st.form(f"publish_form_{selected_job_id}"):
             meta = pipeline_data.get("metadata") or job.get("metadata") or {}
             default_title = meta.get("title") or f"Video: {job.get('topic', selected_job_id)}"
@@ -1078,24 +1084,24 @@ with tab_master:
                 with open(draft_file, "w", encoding="utf-8") as f:
                     json.dump(draft_payload, f, ensure_ascii=False, indent=2)
 
+                scheduled_at = None
                 try:
-                    requests.put(
+                    r_approve = requests.put(
                         f"{API_URL}/jobs/{selected_job_id}/approve",
                         json={"job_id": selected_job_id, "platforms": platforms},
                         timeout=3.0
                     )
-                except Exception:
-                    pass
+                    if r_approve.status_code == 200:
+                        scheduled_at = (r_approve.json() or {}).get("scheduled_at")
+                    else:
+                        st.error(f"Lỗi lên lịch xuất bản: {r_approve.text}")
+                except Exception as ex:
+                    st.error(f"Lỗi kết nối khi lên lịch xuất bản: {ex}")
 
-                # Also update DB directly if possible
-                try:
-                    from dashboard.api.database import SessionLocal, update_job_status
-                    from dashboard.api.models import JobStatus
-                    db = SessionLocal()
-                    update_job_status(db, selected_job_id, JobStatus.approved)
-                    db.close()
-                except Exception:
-                    pass
-
-                st.success(f"🎉 Đã phê duyệt và lưu bản nháp xuất bản tại `{draft_file}`!")
+                if scheduled_at:
+                    st.success(
+                        f"🎉 Đã phê duyệt, lưu nháp tại `{draft_file}` và lên lịch đăng lúc `{scheduled_at}`!"
+                    )
+                else:
+                    st.success(f"🎉 Đã phê duyệt và lưu bản nháp xuất bản tại `{draft_file}`!")
                 st.rerun()

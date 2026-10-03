@@ -37,6 +37,7 @@ from loguru import logger
 from dashboard.api.database import (
     SessionLocal,
     get_job,
+    list_jobs,
     update_job_status,
     update_job_stage,
     update_job_output,
@@ -1435,6 +1436,44 @@ def publish_video(job_id: str, platforms: list, schedule_time: Union[str, dateti
         return {"status": "publish_failed", "job_id": job_id, "error": str(e)}
     finally:
         db.close()
+
+
+def run_due_publish_jobs(now: Optional[datetime] = None) -> list[Dict[str, Any]]:
+    """
+    Publish every scheduled job whose slot has arrived.
+
+    This is the callable used by the lightweight APScheduler in the API app;
+    keeping it here also makes due-job processing directly testable without
+    starting a background scheduler.
+    """
+    current = now or datetime.now(timezone.utc)
+    if current.tzinfo is None:
+        current = current.replace(tzinfo=timezone.utc)
+
+    db = SessionLocal()
+    due: list[tuple[str, list]] = []
+    try:
+        for job in list_jobs(db):
+            if getattr(job, "stage", "") != "scheduled":
+                continue
+            status_value = job.status.value if hasattr(job.status, "value") else str(job.status)
+            if status_value != JobStatus.scheduled.value:
+                continue
+            publish = (job.pipeline_data or {}).get("publish") or {}
+            scheduled_at = _parse_schedule_time(publish.get("scheduled_at"))
+            if not scheduled_at:
+                continue
+            if scheduled_at.tzinfo is None:
+                scheduled_at = scheduled_at.replace(tzinfo=timezone.utc)
+            if scheduled_at <= current:
+                due.append((job.id, publish.get("platforms") or []))
+    finally:
+        db.close()
+
+    results = []
+    for job_id, platforms in due:
+        results.append(publish_video(job_id, platforms, schedule_time=None))
+    return results
 
 
 @app.task(name="dashboard.worker.video_tasks.publish_video_task")

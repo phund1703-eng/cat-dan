@@ -40,6 +40,7 @@ def fetch_jobs_data():
                 "voice_preset": getattr(dj, "voice_preset", "default") or "default",
                 "created_at": dj.created_at.isoformat() if dj.created_at else "",
                 "output_path": dj.output_path,
+                "pipeline_data": dj.pipeline_data or {},
                 "error": dj.error
             })
         db.close()
@@ -59,6 +60,8 @@ with col_f1:
             "assets_ready",
             "rendering",
             "done",
+            "scheduled",
+            "published",
             "failed"
         ],
         format_func=lambda s: {
@@ -69,6 +72,8 @@ with col_f1:
             "assets_ready": "🖼️ Chờ duyệt ảnh (assets_ready)",
             "rendering": "🎬 Đang render (rendering)",
             "done": "✅ Hoàn thành (done)",
+            "scheduled": "📅 Đã lên lịch (scheduled)",
+            "published": "🚀 Đã đăng (published)",
             "failed": "❌ Thất bại (failed)"
         }.get(s, s)
     )
@@ -92,6 +97,9 @@ else:
         "assets_ready": "🖼️ Chờ duyệt ảnh (Step-by-Step)",
         "rendering": "🎬 Đang render",
         "done": "✅ Hoàn thành",
+        "scheduled": "📅 Đã lên lịch đăng",
+        "published": "🚀 Đã đăng",
+        "publish_failed": "⚠️ Đăng thất bại (video vẫn xong)",
         "failed": "❌ Thất bại"
     }
 
@@ -104,6 +112,8 @@ else:
             badge = "🖼️ Storyboard xong (Auto)"
 
         created_str = str(j.get("created_at", ""))[:19].replace("T", " ")
+        publish_info = (j.get("pipeline_data") or {}).get("publish") or {}
+        scheduled_str = str(publish_info.get("scheduled_at", ""))[:19].replace("T", " ")
 
         df_records.append({
             "Job ID": j["id"][:8] + "...",
@@ -111,6 +121,7 @@ else:
             "Chế độ": "🛠️ Step-by-Step" if mode == "step_by_step" else "⚡ Auto",
             "Giai đoạn": badge,
             "Trạng thái": j.get("status", "pending"),
+            "Đăng dự kiến": scheduled_str or "—",
             "Mỹ thuật": j.get("art_style", "photorealistic"),
             "Ngày tạo": created_str,
             "full_id": j["id"]

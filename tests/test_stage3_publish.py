@@ -236,3 +236,154 @@ def test_worker_ensures_thumbnail_next_to_master(tmp_path, monkeypatch):
     with Image.open(result["thumbnail_path"]) as image:
         assert image.size == (1080, 1920)
     assert pipeline_data["thumbnail_text"] == "CƠ THỂ KỲ DIỆU"
+
+
+# ---------------------------------------------------------------------------
+# Task 3.3 — Channels config + scheduling
+# ---------------------------------------------------------------------------
+def test_channels_config_reads_config_directory():
+    from dashboard.api.routes.channels import (
+        CHANNELS_CONFIG_PATH,
+        get_channel,
+        get_channel_schedule,
+        load_channels_config,
+    )
+
+    assert CHANNELS_CONFIG_PATH.name == "channels.yaml"
+    assert CHANNELS_CONFIG_PATH.parent.name == "config"
+    config = load_channels_config()
+    assert "collage_broll" in config
+    assert get_channel("collage_broll")["style"] == "collage_broll"
+    assert get_channel_schedule("collage_broll")["schedule"]["max_per_day"] == 3
+
+
+def test_scheduler_feature_flag_can_be_disabled(monkeypatch):
+    from dashboard.api.publish_scheduler import scheduler_enabled
+
+    monkeypatch.setenv("CATDAN_PUBLISH_SCHEDULER_ENABLED", "0")
+    assert scheduler_enabled() is False
+    monkeypatch.setenv("CATDAN_PUBLISH_SCHEDULER_ENABLED", "1")
+    assert scheduler_enabled() is True
+
+
+@pytest.fixture()
+def schedule_env(tmp_path, monkeypatch):
+    engine = create_engine(
+        f"sqlite:///{tmp_path}/stage3-schedule.db", connect_args={"check_same_thread": False}
+    )
+    TestingSession = sessionmaker(autocommit=False, autoflush=False, bind=engine)
+    db_mod.Base.metadata.create_all(bind=engine)
+    monkeypatch.setattr(db_mod, "SessionLocal", TestingSession)
+    monkeypatch.setattr(jobs_mod, "SessionLocal", TestingSession)
+    monkeypatch.setattr(worker_mod, "SessionLocal", TestingSession)
+
+    db = TestingSession()
+    try:
+        for idx in range(3):
+            job = db_mod.VideoJob(
+                id=f"job-schedule-{idx}",
+                topic=f"Chủ đề {idx}",
+                style="collage_broll",
+                language="vi",
+                status=JobStatus.done,
+                stage="done",
+                mode="auto",
+            )
+            db.add(job)
+        db.commit()
+    finally:
+        db.close()
+    return TestingSession
+
+
+def test_approve_three_jobs_with_max_per_day_two_rolls_third_to_next_day(
+    schedule_env, monkeypatch
+):
+    from datetime import datetime, timezone
+
+    TestingSession = schedule_env
+
+    fake_schedule = {
+        "enabled": True,
+        "timezone": "UTC",
+        "posting_times": ["07:00", "12:00", "20:00"],
+        "days": ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"],
+        "max_per_day": 2,
+    }
+    monkeypatch.setattr(jobs_mod, "get_schedule_for_style", lambda style: fake_schedule)
+
+    class FakeDateTime(datetime):
+        fixed = datetime(2026, 10, 3, 6, 0, tzinfo=timezone.utc)
+
+        @classmethod
+        def now(cls, tz=None):
+            return cls.fixed.astimezone(tz) if tz else cls.fixed
+
+    monkeypatch.setattr(jobs_mod, "datetime", FakeDateTime)
+
+    from fastapi.testclient import TestClient
+    from dashboard.api.main import app
+
+    with TestClient(app) as client:
+        scheduled = []
+        for idx in range(3):
+            response = client.put(
+                f"/jobs/job-schedule-{idx}/approve",
+                json={"platforms": ["youtube"]},
+            )
+            assert response.status_code == 200, response.text
+            payload = response.json()
+            assert payload["status"] == "scheduled"
+            scheduled.append(payload["scheduled_at"])
+
+    assert scheduled[0].startswith("2026-10-03T07:00")
+    assert scheduled[1].startswith("2026-10-03T12:00")
+    assert scheduled[2].startswith("2026-10-04T07:00")
+
+    db = TestingSession()
+    try:
+        for idx in range(3):
+            job = worker_mod.get_job(db, f"job-schedule-{idx}")
+            assert job.status == JobStatus.scheduled
+            assert job.stage == "scheduled"
+            assert job.pipeline_data["publish"]["status"] == "scheduled"
+            assert job.pipeline_data["publish"]["scheduled_at"] == scheduled[idx]
+    finally:
+        db.close()
+
+
+def test_run_due_publish_jobs_calls_publisher_only_when_due(schedule_env, monkeypatch):
+    from datetime import datetime, timezone
+
+    TestingSession = schedule_env
+    db = TestingSession()
+    try:
+        job = worker_mod.get_job(db, "job-schedule-0")
+        worker_mod.update_job_stage(
+            db,
+            job.id,
+            "scheduled",
+            status=JobStatus.scheduled,
+            pipeline_data={
+                "publish": {
+                    "status": "scheduled",
+                    "platforms": ["youtube"],
+                    "scheduled_at": "2026-10-03T07:00:00+00:00",
+                }
+            },
+        )
+    finally:
+        db.close()
+
+    calls = []
+
+    def fake_publish(job_id, platforms, schedule_time=None):
+        calls.append((job_id, platforms, schedule_time))
+        return {"status": "published", "job_id": job_id}
+
+    monkeypatch.setattr(worker_mod, "publish_video", fake_publish)
+
+    assert worker_mod.run_due_publish_jobs(datetime(2026, 10, 3, 6, 59, tzinfo=timezone.utc)) == []
+    results = worker_mod.run_due_publish_jobs(datetime(2026, 10, 3, 7, 0, tzinfo=timezone.utc))
+    assert results == [{"status": "published", "job_id": "job-schedule-0"}]
+    assert calls == [("job-schedule-0", ["youtube"], None)]

@@ -2,7 +2,7 @@ import os
 import json
 import uuid
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import List, Optional, Dict, Any, Union, Callable
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, UploadFile, File, Form, Request, Response
@@ -39,6 +39,12 @@ from dashboard.api.database import (
     update_job_stage,
     update_job_output,
     update_scene_image
+)
+from dashboard.api.routes.channels import (
+    compute_next_publish_slot,
+    get_channel_config,
+    get_schedule_for_style,
+    get_schedule_timezone,
 )
 
 class SceneValidationRoute(APIRoute):
@@ -345,6 +351,72 @@ def get_job_by_id(job_id: str, db: Session = Depends(get_db)):
         raise HTTPException(status_code=404, detail="Job not found")
     return convert_db_to_response(db_job)
 
+def _reserved_publish_slots(db: Session, style: str, exclude_job_id: str) -> list:
+    """Existing scheduled/published slots that consume a channel's daily cap."""
+    reserved = []
+    for other in list_jobs(db, style=style):
+        if other.id == exclude_job_id:
+            continue
+        status_value = other.status.value if hasattr(other.status, "value") else str(other.status)
+        if status_value not in {JobStatus.scheduled.value, JobStatus.published.value}:
+            continue
+        publish = (other.pipeline_data or {}).get("publish") or {}
+        if publish.get("scheduled_at"):
+            reserved.append(publish["scheduled_at"])
+    return reserved
+
+
+def _schedule_approved_job(db: Session, db_job, platforms: list, requested_schedule_time=None) -> dict:
+    """
+    Mark an approved job as scheduled using config/channels.yaml.
+
+    An explicit request time wins; otherwise the next slot is computed from
+    the channel's posting_times/max_per_day and existing reservations.
+    """
+    schedule = get_schedule_for_style(db_job.style)
+    tz = get_schedule_timezone(schedule)
+
+    if requested_schedule_time:
+        scheduled_at = requested_schedule_time
+        if scheduled_at.tzinfo is None:
+            scheduled_at = scheduled_at.replace(tzinfo=tz)
+    else:
+        scheduled_at = compute_next_publish_slot(
+            schedule,
+            reserved_slots=_reserved_publish_slots(db, db_job.style, db_job.id),
+            now=datetime.now(tz),
+        )
+
+    channel = get_channel_config(db_job.style) or {}
+    p_data = db_job.pipeline_data or {}
+    publish = {
+        **(p_data.get("publish") or {}),
+        "status": "scheduled",
+        "platforms": [str(p) for p in (platforms or [])],
+        "scheduled_at": scheduled_at.isoformat(),
+        "channel": channel.get("id", db_job.style),
+        "channel_name": channel.get("name", ""),
+        "postiz_post_id": (p_data.get("publish") or {}).get("postiz_post_id"),
+    }
+    p_data["publish"] = publish
+    update_job_stage(
+        db,
+        db_job.id,
+        stage="scheduled",
+        status=JobStatus.scheduled,
+        pipeline_data=p_data,
+        error=None,
+    )
+    # update_job_stage treats error=None as "leave unchanged"; scheduling a
+    # fresh approval should clear any stale render/publish error display.
+    refreshed = get_job(db, db_job.id)
+    if refreshed:
+        refreshed.error = None
+        db.commit()
+        db.refresh(refreshed)
+    return publish
+
+
 @router.put("/{job_id}/approve")
 def approve_job(
     job_id: str,
@@ -356,15 +428,20 @@ def approve_job(
     if not db_job:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    update_job_status(db, job_id, JobStatus.approved)
-    background_tasks.add_task(
-        _execute_publish,
-        job_id,
+    publish = _schedule_approved_job(
+        db,
+        db_job,
         request.platforms,
-        request.schedule_time.isoformat() if request.schedule_time else None
+        requested_schedule_time=request.schedule_time,
     )
 
-    return {"status": "approved", "job_id": job_id}
+    return {
+        "status": "scheduled",
+        "approval_status": "approved",
+        "job_id": job_id,
+        "scheduled_at": publish["scheduled_at"],
+        "publish": publish,
+    }
 
 @router.put("/{job_id}/reject")
 def reject_job(job_id: str, db: Session = Depends(get_db)):
