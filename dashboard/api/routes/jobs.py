@@ -464,6 +464,7 @@ async def step_generate_script(
         json.dump(script, f, ensure_ascii=False, indent=2)
 
     p_data = db_job.pipeline_data or {}
+    p_data["script_origin"] = script.get("script_origin", "gemini")
     p_data["script"] = {
         "title": script.get("title", f"Video about {topic}"),
         "description": script.get("description", f"Generated video for {topic}"),

@@ -55,6 +55,7 @@ class ScriptGenerator:
             logger.warning(f"ScriptGenerator: Gemini API unavailable or quota limit reached ({e_gemini}). Using dynamic topic-aware fallback script...")
             script = self._generate_fallback_script(topic, style, language, duration)
 
+        script.setdefault("script_origin", "gemini")
         normalize_script_scenes(script)
         job_id = str(uuid.uuid4())[:8]
         script["job_id"] = job_id
@@ -126,7 +127,7 @@ class ScriptGenerator:
             hashtags = ["#shorts", "#sinhhoc", "#tebao", "#suckhoe", "#khoahoc", "#kienthuc"] if not is_en else ["#shorts", "#biology", "#cells", "#science", "#health"]
             scenes_data = [
                 {
-                    "narration": "Mỗi giây trôi qua, cơ thể con người sản sinh ra hơn hai triệu tế bào mới để thay thế và duy trì sự sống kỳ diệu." if not is_en else "Every single second, the human body produces over two million new cells to sustain life.",
+                    "narration": "Cơ thể con người không ngừng sản sinh tế bào mới để thay thế và duy trì sự sống kỳ diệu." if not is_en else "The human body constantly produces new cells to replace old ones and sustain life.",
                     "core_meaning": "Sự tái sinh liên tục và quy mô kỳ vĩ của tế bào người",
                     "visual_metaphor": "Tế bào sinh học hình cầu phát sáng, kính hiển vi kim loại cổ điển, lam kính phòng thí nghiệm",
                     "focal_keyword": "human cell",
@@ -140,7 +141,7 @@ class ScriptGenerator:
                     "visual_description": "halftone paper collage cutout style, isolated background, emerald teal paper field, glowing cell sphere and microscope cutout with cream keyline, paper drop shadow",
                 },
                 {
-                    "narration": "Nếu trải dài toàn bộ chuỗi xoắn kép DNA trong mọi tế bào của một người, chiều dài của nó có thể vươn từ Trái Đất đến tận Sao Diêm Vương." if not is_en else "If unravelled, the complete DNA strands inside a single person would stretch from Earth all the way to Pluto.",
+                    "narration": "Chuỗi xoắn kép DNA nằm gọn trong nhân tế bào, mang theo mật mã di truyền hướng dẫn mọi hoạt động của sự sống." if not is_en else "The double-helix DNA strand sits inside the cell nucleus, carrying the genetic code that guides all life processes.",
                     "core_meaning": "Mật độ thông tin di truyền khổng lồ chứa trong nhân tế bào",
                     "visual_metaphor": "Chuỗi xoắn kép DNA phát sáng, ty thể tế bào, thước đo cuộn cổ điển",
                     "focal_keyword": "dna strand",
@@ -190,7 +191,7 @@ class ScriptGenerator:
                     "visual_description": "halftone paper collage cutout style, isolated background, deep cobalt blue paper field, glowing galaxy cutout with cream keyline, paper drop shadow",
                 },
                 {
-                    "narration": "Một ngày trên sao Kim dài hơn cả một năm trên Trái Đất vì nó tự quay quanh trục cực kỳ chậm." if not is_en else "A single day on Venus is longer than its entire year because of its extraordinarily slow rotation.",
+                    "narration": "Sao Kim tự quay quanh trục vô cùng chậm chạp, khiến nhịp ngày đêm nơi đây khác hẳn Trái Đất." if not is_en else "Venus rotates extraordinarily slowly on its axis, giving it a day-night rhythm unlike anywhere else.",
                     "core_meaning": "Thời gian tương đối và sự chuyển động ngược ngạo",
                     "visual_metaphor": "Sao Kim màu đất nung, mặt đồng hồ tan chảy, lịch số xoay tròn",
                     "focal_keyword": "planet",
@@ -240,7 +241,7 @@ class ScriptGenerator:
                     "visual_description": "halftone paper collage cutout style, isolated background, dark indigo paper field, microchip and glowing circuit cutout with cream keyline, paper drop shadow",
                 },
                 {
-                    "narration": "Hàng tỷ kết nối trong các mô hình học sâu cho phép máy tính hiểu ngôn ngữ và sáng tạo tự nhiên như con người." if not is_en else "Billions of neural connections empower modern algorithms to process complex knowledge in milliseconds.",
+                    "narration": "Các mô hình học sâu với vô vàn kết nối cho phép máy tính hiểu ngôn ngữ và sáng tạo tự nhiên như con người." if not is_en else "Vast webs of neural connections empower modern algorithms to process complex knowledge almost instantly.",
                     "core_meaning": "Mạng nơ-ron nhân tạo và khả năng suy luận số",
                     "visual_metaphor": "Mạng nơ-ron phát sáng, sợi quang học truyền dữ liệu, lăng kính pha lê quang học",
                     "focal_keyword": "neural network",
@@ -276,7 +277,7 @@ class ScriptGenerator:
             hashtags = ["#shorts", "#lichsu", "#codai", "#khampha", "#kienthuc"] if not is_en else ["#shorts", "#history", "#ancient", "#discovery", "#knowledge"]
             scenes_data = [
                 {
-                    "narration": "Những trang sử ngàn năm của các nền văn minh cổ đại luôn lưu giữ những bài học vô giá cho nhân loại." if not is_en else "Ancient civilizational scrolls preserve timeless lessons that continue to enlighten humanity.",
+                    "narration": "Những trang sử lâu đời của các nền văn minh cổ đại luôn lưu giữ những bài học vô giá cho nhân loại." if not is_en else "Ancient civilizational scrolls preserve timeless lessons that continue to enlighten humanity.",
                     "core_meaning": "Dấu ấn trường tồn của di sản lịch sử",
                     "visual_metaphor": "Cuộn giấy cói cổ đại, la bàn hàng hải bằng đồng, bút lông ngỗng và bình mực",
                     "focal_keyword": "papyrus scroll",
@@ -340,7 +341,7 @@ class ScriptGenerator:
                     "visual_description": "halftone paper collage cutout style, isolated background, dark ocean navy paper field, research submarine and glowing jellyfish cutout with cream keyline, paper drop shadow",
                 },
                 {
-                    "narration": "Những rạn san hô rực rỡ nuôi dưỡng hơn hai mươi lăm phần trăm sinh vật biển dù chỉ chiếm diện tích rất nhỏ." if not is_en else "Vibrant coral reefs shelter more than a quarter of all marine life while covering a fraction of the sea floor.",
+                    "narration": "Những rạn san hô rực rỡ là chiếc nôi nuôi dưỡng vô vàn sinh vật biển dù chỉ chiếm một phần nhỏ diện tích đại dương." if not is_en else "Vibrant coral reefs shelter a vast share of marine life while covering only a small fraction of the sea floor.",
                     "core_meaning": "Chiếc nôi đa dạng sinh học của hành tinh xanh",
                     "visual_metaphor": "Rạn san hô nhiệt đới rực rỡ, vỏ ốc hóa thạch cổ xưa, la bàn định hướng biển",
                     "focal_keyword": "coral reef",
@@ -449,6 +450,7 @@ class ScriptGenerator:
             "title": title,
             "description": desc,
             "topic_domain": domain,
+            "script_origin": "fallback",
             "hashtags": hashtags,
             "scenes": scenes,
             "estimated_duration": sum(s["duration"] for s in scenes)

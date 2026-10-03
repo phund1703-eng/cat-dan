@@ -42,7 +42,7 @@ _MEASURE_RE = re.compile(
     re.IGNORECASE,
 )
 _NUMBER_WORDS_RE = re.compile(
-    r"(phần trăm|phần nghìn|triệu|tỷ|tỉ|nghìn|ngàn|percent|million|billion|trillion|thousand)",
+    r"\b(phần trăm|phần nghìn|triệu|tỷ|tỉ|nghìn|ngàn|percent|million|billion|trillion|thousand)\b",
     re.IGNORECASE,
 )
 

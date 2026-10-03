@@ -407,6 +407,9 @@ with tab_script:
 
     script_data = pipeline_data.get("script") or job.get("script") or {}
     scenes = script_data.get("scenes") or pipeline_data.get("scenes") or []
+    _origin = pipeline_data.get("script_origin")
+    if _origin:
+        st.caption(f"Nguồn kịch bản: **{'Gemini AI' if _origin == 'gemini' else 'Template fallback (không dùng AI)'}**")
 
     # AI Prompt Block
     prompt_text = script_data.get("prompt_used") or script_data.get("prompt") or script_data.get("raw_prompt")
