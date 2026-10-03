@@ -1,3 +1,4 @@
+import re
 import uuid
 import json
 from pathlib import Path
@@ -105,9 +106,9 @@ class ScriptGenerator:
             "phi hành gia", "astronaut", "mặt trăng", "moon", "sao kim", "venus", "solar system"
         ]
         tech_keywords = [
-            "công nghệ", "technology", "tech", "ai", "trí tuệ nhân tạo", "robot",
+            "công nghệ", "technology", "tech", "ai", "trí tuệ nhân tạo", "intelligence", "robot",
             "máy tính", "computer", "lập trình", "code", "coding", "dữ liệu", "data",
-            "thuật toán", "algorithm", "internet", "software", "phần mềm", "bán dẫn", "chip"
+            "thuật toán", "algorithm", "internet", "software", "phần mềm", "bán dẫn", "semiconductor", "chip"
         ]
         hist_keywords = [
             "lịch sử", "history", "cổ đại", "ancient", "ai cập", "egypt", "vương triều",
@@ -120,7 +121,35 @@ class ScriptGenerator:
             "trái đất", "earth", "khí hậu", "climate", "san hô", "coral"
         ]
 
-        if any(k in topic_lower for k in bio_keywords):
+        # Phân loại domain theo ĐIỂM số keyword khớp ranh giới từ (word
+        # boundary, cho phép số nhiều tiếng Anh tận cùng 's') thay vì khớp
+        # substring của một danh sách duy nhất: tránh lỗi kiểu "ai" trong
+        # "ai cập" -> technology, hay "gen" trong "intelligence" -> biology.
+        # Hòa điểm thì giữ thứ tự ưu tiên cũ: biology > space > tech >
+        # history > geography; không khớp gì -> "science".
+        def _keyword_hits(keywords) -> int:
+            hits = 0
+            for k in keywords:
+                if re.search(rf"(?<!\w){re.escape(k)}(?:s)?(?!\w)", topic_lower):
+                    hits += 1
+            return hits
+
+        _domain_candidates = [
+            ("biology", bio_keywords),
+            ("space", space_keywords),
+            ("technology", tech_keywords),
+            ("history", hist_keywords),
+            ("geography", nature_keywords),
+        ]
+        domain = "science"
+        _best_hits = 0
+        for _domain_name, _keywords in _domain_candidates:
+            _hits = _keyword_hits(_keywords)
+            if _hits > _best_hits:
+                _best_hits = _hits
+                domain = _domain_name
+
+        if domain == "biology":
             domain = "biology"
             title = f"{topic_clean}: 3 Bí Ẩn Kỳ Diệu Của Sự Sống" if not is_en else f"{topic_clean}: 3 Wonders of Cellular Biology"
             desc = f"Khám phá các bí mật khoa học sinh học phi thường về {topic_clean}." if not is_en else f"Fascinating biological insights and facts about {topic_clean}."
@@ -170,7 +199,7 @@ class ScriptGenerator:
                 }
             ]
 
-        elif any(k in topic_lower for k in space_keywords):
+        elif domain == "space":
             domain = "space"
             title = f"{topic_clean}: 3 Sự Thật Thú Vị Về Vũ Trụ" if not is_en else f"{topic_clean}: 3 Fascinating Facts About Space"
             desc = f"Khám phá những bí ẩn kinh ngạc về vũ trụ qua chủ đề {topic_clean}." if not is_en else f"Mind-blowing cosmic facts and wonders about {topic_clean}."
@@ -220,7 +249,7 @@ class ScriptGenerator:
                 }
             ]
 
-        elif any(k in topic_lower for k in tech_keywords):
+        elif domain == "technology":
             domain = "technology"
             title = f"{topic_clean}: 3 Đột Phá Công Nghệ Tương Lai" if not is_en else f"{topic_clean}: 3 Tech Breakthroughs"
             desc = f"Khám phá những bước tiến công nghệ đột phá về {topic_clean}." if not is_en else f"Exploring transformative technology insights about {topic_clean}."
@@ -270,7 +299,7 @@ class ScriptGenerator:
                 }
             ]
 
-        elif any(k in topic_lower for k in hist_keywords):
+        elif domain == "history":
             domain = "history"
             title = f"{topic_clean}: 3 Bí Mật Lịch Sử Vượt Thời Gian" if not is_en else f"{topic_clean}: 3 Timeless Historical Secrets"
             desc = f"Hành trình khám phá những câu chuyện lịch sử kỳ vĩ về {topic_clean}." if not is_en else f"Exploring epic historical stories and secrets about {topic_clean}."
@@ -320,7 +349,7 @@ class ScriptGenerator:
                 }
             ]
 
-        elif any(k in topic_lower for k in nature_keywords):
+        elif domain == "geography":
             domain = "geography"
             title = f"{topic_clean}: 3 Kỳ Quan Thiên Nhiên Bí Ẩn" if not is_en else f"{topic_clean}: 3 Natural Wonders"
             desc = f"Khám phá những vẻ đẹp hoang sơ và kỳ vĩ của thiên nhiên về {topic_clean}." if not is_en else f"Discovering pristine natural wonders about {topic_clean}."
