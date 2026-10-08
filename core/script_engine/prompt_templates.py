@@ -54,7 +54,14 @@ QUY TẮC BẮT BUỘC CHO TỪNG CẢNH (SCENE):
 5. Gate 2 (Prompt sinh ảnh tĩnh hoàn chỉnh):
    Sử dụng chính xác mẫu chuyên gia:
    "Use case: ads-marketing. Asset type: final still frame for a 9:16 image-to-video B-roll clip. Primary request: Create a finished editorial paper-collage image expressing [visual_metaphor]. Scene/backdrop: perfectly flat [color_field] paper field #[color_hex] with subtle uncoated paper fiber. Style/medium: premium editorial stop-motion paper collage; black-and-white halftone photographic cut-outs mixed with selective colored cardstock. Composition/framing: vertical 9:16 locked poster frame; central subject within the middle 70 percent; generous clean color-field negative space; 3–6 large separable paper groups for later assemble-from-empty animation. Materials/textures: visible printed halftone dots, crisp machine-cut edges, thin warm-cream paper keylines, soft low-opacity physical drop shadows. Avoid: no typography, no readable letters, no numerals, no logos, no watermark, no UI, no subtitles, no glossy 3D, no photoreal environment, no clutter."
-6. QUY TẮC NGUỒN TRÍCH DẪN (BẮT BUỘC):
+6. NHỊP KỂ CHUYỆN (STORY BEATS — BẮT BUỘC):
+   - Mỗi scene PHẢI có 2-4 beats trong trường "beats": các mảnh cắt dán diễn thành câu chuyện theo nhịp lời thoại, KHÔNG phải một hình minh họa đứng yên.
+   - "narration_part" phải trích NGUYÊN VĂN từ "narration"; các beat nối tiếp nhau theo đúng thứ tự và phủ toàn bộ narration.
+   - Mỗi beat có 1-3 elements. "role": "focal" (nhân vật chính), "secondary" (đối tượng tương tác), "prop" (đạo cụ), "label" (chữ vẽ tay).
+   - "action": "enter" (bay vào từ phía "from": left/right/top/bottom), "exit" (trượt ra theo phía "to"), "emphasize" (nảy nhấn mạnh), "swap_pose" (đổi tư thế nhân vật, kèm "pose": tên tư thế như "alt").
+   - "keyword" tuân thủ quy tắc vật thể cụ thể 1-3 từ tiếng Anh như focal_keyword.
+   - "emphasis_words": tối đa 3 từ trích NGUYÊN VĂN từ narration_part để hiện chữ nhấn theo nhịp nói.
+7. QUY TẮC NGUỒN TRÍCH DẪN (BẮT BUỘC):
    - Mỗi cảnh phải có trường "fact": một câu khẳng định khoa học cốt lõi mà lời thoại của cảnh dựa vào.
    - Nếu cảnh chứa con số, năm, tỉ lệ, đơn vị đo hoặc khẳng định khoa học cụ thể, trường "sources" PHẢI có tối thiểu 1 nguồn dạng {{"title", "url", "publisher", "accessed_date"}}.
    - CHỈ ghi URL có thật mà bạn chắc chắn tồn tại của tổ chức uy tín (WHO, NASA, NOAA, Britannica, PubMed, Wikipedia, cơ quan nhà nước, trường đại học...). TUYỆT ĐỐI KHÔNG bịa URL: nếu không chắc chắn về một URL cụ thể, hãy để "sources": [] trống — hệ thống sẽ yêu cầu bổ sung sau.
@@ -83,6 +90,16 @@ Bạn phải trả về DUY NHẤT một chuỗi JSON hợp lệ với cấu tr�
       "color_field": "Deep Cobalt",
       "color_hex": "1D3557",
       "assembly_order": "Thứ tự các đồ vật bay vào/lắp ráp từ nền trống",
+      "beats": [
+        {{
+          "narration_part": "trích nguyên văn một cụm lời thoại của beat này",
+          "elements": [
+            {{"role": "focal", "keyword": "white blood cell", "action": "enter", "from": "left", "to": "right", "pose": ""}},
+            {{"role": "secondary", "keyword": "bacterium", "action": "enter", "from": "right", "to": "left", "pose": ""}}
+          ],
+          "emphasis_words": ["kẻ lạ mặt"]
+        }}
+      ],
       "still_image_prompt": "Use case: ads-marketing. Asset type: final still frame for a 9:16 image-to-video B-roll clip...",
       "visual_description": "Mô tả ngắn gọn cảnh thị giác cắt dán",
       "duration": 5.0
@@ -104,7 +121,20 @@ MANDATORY RULES FOR EACH SCENE:
 4. Contextual flags:
    - has_hand: bool (true only if human intervention/pointing/manipulation is depicted).
    - has_camera: bool (true only if observation or media perspective is depicted).
-5. SOURCE CITATION RULES (MANDATORY):
+5. STORY BEATS (MANDATORY):
+   - Every scene MUST include 2-4 beats in the "beats" field: paper cutouts must act out
+     a story following the narration rhythm, NOT a single static illustration.
+   - "narration_part" must be a VERBATIM excerpt of "narration"; beats follow narration
+     order and together cover the whole narration.
+   - Each beat has 1-3 elements. "role": "focal" (main character), "secondary" (interacting
+     object), "prop", "label" (hand-drawn text).
+   - "action": "enter" (flies in from "from": left/right/top/bottom), "exit" (slides out
+     toward "to"), "emphasize" (pop emphasis), "swap_pose" (character changes pose,
+     with "pose": pose name like "alt").
+   - "keyword" follows the concrete physical object rule (1-3 English words).
+   - "emphasis_words": up to 3 words quoted VERBATIM from narration_part, shown as kinetic
+     type on the narration beat.
+6. SOURCE CITATION RULES (MANDATORY):
    - Every scene must include a "fact" field: one short sentence stating the core scientific claim behind the narration.
    - If a scene contains numbers, years, ratios, measurement units, or any specific scientific claim, its "sources" list MUST contain at least 1 entry: {{"title", "url", "publisher", "accessed_date"}}.
    - ONLY provide URLs you are confident actually exist from reputable organizations (WHO, NASA, NOAA, Britannica, PubMed, Wikipedia, government agencies, universities...). NEVER invent a URL: if you are not sure of an exact URL, leave "sources": [] empty — the system will request it later.
@@ -133,6 +163,16 @@ Return ONLY a valid JSON string:
       "color_field": "Deep Cobalt",
       "color_hex": "1D3557",
       "assembly_order": "Assembly order",
+      "beats": [
+        {{
+          "narration_part": "verbatim excerpt of this beat's narration",
+          "elements": [
+            {{"role": "focal", "keyword": "astronaut", "action": "enter", "from": "left", "to": "right", "pose": ""}},
+            {{"role": "secondary", "keyword": "hourglass", "action": "enter", "from": "right", "to": "left", "pose": ""}}
+          ],
+          "emphasis_words": ["time"]
+        }}
+      ],
       "still_image_prompt": "Use case: ads-marketing. Asset type: final still frame...",
       "visual_description": "Short visual description",
       "duration": 5.0
