@@ -250,23 +250,34 @@ class CollageEngine:
         # Ghép nối các cảnh (chèn chuyển cảnh giấy xé giữa các scene)
         raw_concat_path = str(work_dir / "concat_raw.mp4")
         logger.info(f"🔗 Đang ghép nối {len(scene_video_clips)} cảnh thành video chính...")
-        concat_videos(
-            self._insert_paper_wipes(scene_video_clips, work_dir, width, height),
-            raw_concat_path,
-        )
+        mixed_clips = self._insert_paper_wipes(scene_video_clips, work_dir, width, height)
+        concat_videos(mixed_clips, raw_concat_path)
+        scene_start_times = self._scene_start_times(mixed_clips, scene_durations)
 
         # Xuất file phụ đề TikTok ASS chuẩn 100% tiếng Việt từ script
         final_video_path = str(out_path)
         ass_path = str(work_dir / "subtitles.ass")
         
         try:
-            logger.info("📝 Đang tạo phụ đề TikTok động chuẩn 100% chính tả tiếng Việt từ kịch bản...")
-            self.sub_generator.generate_tiktok_ass(
-                script=script,
-                scene_durations=scene_durations,
-                output_path=ass_path,
-                format=format
-            )
+            logger.info("📝 Đang tạo phụ đề karaoke theo nhịp giọng đọc từ kịch bản...")
+            try:
+                self.sub_generator.generate_wordkaraoke_ass(
+                    script=script,
+                    scene_audios=audio_files,
+                    scene_durations=scene_durations,
+                    scene_start_times=scene_start_times,
+                    output_path=ass_path,
+                    format=format,
+                    language=language,
+                )
+            except Exception as e_wk:
+                logger.warning(f"Karaoke word-level lỗi ({e_wk}), fallback phụ đề cụm từ.")
+                self.sub_generator.generate_tiktok_ass(
+                    script=script,
+                    scene_durations=scene_durations,
+                    output_path=ass_path,
+                    format=format
+                )
             sub_video_path = str(work_dir / "video_with_subs.mp4")
             self.sub_generator.burn_subtitles(raw_concat_path, ass_path, sub_video_path)
             current_video = sub_video_path
@@ -374,6 +385,24 @@ class CollageEngine:
             fps=12,
             pose_assets=pose_assets or None,
         )
+
+    @staticmethod
+    def _scene_start_times(mixed_clips: List[str], scene_durations: List[float],
+                           wipe_duration: float = 0.5) -> List[float]:
+        """
+        Mốc bắt đầu mỗi scene trên timeline cuối (đã gồm wipe chuyển cảnh),
+        để phụ đề/karaoke bám đúng nhịp.
+        """
+        starts: List[float] = []
+        t, si = 0.0, 0
+        for c in mixed_clips:
+            if Path(c).name.startswith("wipe_"):
+                t += wipe_duration
+            else:
+                starts.append(round(t, 3))
+                t += float(scene_durations[si]) if si < len(scene_durations) else 0.0
+                si += 1
+        return starts
 
     def _insert_paper_wipes(
         self,

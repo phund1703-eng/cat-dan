@@ -303,6 +303,161 @@ Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
         logger.success(f"✅ Đã tạo file phụ đề TikTok ASS chuẩn 100% tiếng Việt: {out_path}")
         return str(out_path)
 
+    # ------------------------------------------------------------------
+    # Stage 6 Step 5 — word-level karaoke theo nhịp giọng đọc thật
+    # ------------------------------------------------------------------
+    def transcribe_words(
+        self,
+        audio_path: str,
+        language: str = "vi",
+    ) -> List[Dict[str, Any]]:
+        """
+        Transcribe 1 file audio, trả về list [{word, start, end}] (giây).
+        Trả [] khi model lỗi/thiếu hoặc không có từ nào — caller fallback.
+        """
+        if not self.model or not audio_path or not os.path.exists(audio_path):
+            return []
+        try:
+            segments, _info = self.model.transcribe(
+                audio_path, language=language, word_timestamps=True
+            )
+            words: List[Dict[str, Any]] = []
+            for seg in segments or []:
+                for w in getattr(seg, "words", None) or []:
+                    txt = str(getattr(w, "word", "") or "").strip()
+                    if not txt:
+                        continue
+                    words.append({
+                        "word": txt,
+                        "start": float(getattr(w, "start", 0.0) or 0.0),
+                        "end": float(getattr(w, "end", 0.0) or 0.0),
+                    })
+            return [w for w in words if w["end"] > w["start"]]
+        except Exception as e:
+            logger.warning(f"transcribe_words lỗi ({e}), fallback chia đều.")
+            return []
+
+    @staticmethod
+    def _map_script_words_to_timings(
+        script_words: List[str],
+        heard: List[Dict[str, Any]],
+    ) -> List[Dict[str, Any]]:
+        """
+        Gán timing của Whisper cho từng từ kịch bản (giữ chính tả kịch bản).
+        Khớp 1:1 khi số từ bằng nhau; ngược lại nội suy theo tỉ lệ.
+        """
+        n, m = len(script_words), len(heard)
+        if n == 0:
+            return []
+        if m == 0:
+            return [{"word": w, "start": -1.0, "end": -1.0} for w in script_words]
+        out = []
+        for i, w in enumerate(script_words):
+            j = i if n == m else round(i * (m - 1) / max(1, n - 1))
+            h = heard[min(j, m - 1)]
+            out.append({"word": w, "start": h["start"], "end": h["end"]})
+        return out
+
+    def generate_wordkaraoke_ass(
+        self,
+        script: dict,
+        scene_audios: list,
+        scene_durations: list,
+        output_path: str,
+        format: str = "shorts",
+        language: str = "vi",
+        scene_start_times: Optional[list] = None,
+    ) -> str:
+        """
+        Phụ đề karaoke từng từ theo nhịp giọng đọc thật (Whisper word_timestamps).
+
+        - Timing lấy từ audio TTS thật của từng scene; chữ hiển thị lấy từ
+          narration trong kịch bản (giữ chính tả 100%).
+        - scene_start_times: mốc bắt đầu mỗi scene trên timeline cuối (đã gồm
+          wipe chuyển cảnh). Không truyền thì dùng cộng dồn scene_durations.
+        - Scene nào không transcribe được -> fallback chia đều như generate_tiktok_ass.
+        """
+        logger.info(f"Tạo phụ đề karaoke word-level -> {output_path}")
+        out_path = Path(output_path).resolve()
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+
+        is_shorts = (format == "shorts")
+        res_x = 1080 if is_shorts else 1920
+        res_y = 1920 if is_shorts else 1080
+        font_size = 46 if is_shorts else 38
+        margin_v = 280 if is_shorts else 110
+
+        ass_header = f"""[Script Info]
+ScriptType: v4.00+
+PlayResX: {res_x}
+PlayResY: {res_y}
+WrapStyle: 0
+ScaledBorderAndShadow: yes
+
+[V4+ Styles]
+Format: Name, Fontname, Fontsize, PrimaryColour, SecondaryColour, OutlineColour, BackColour, Bold, Italic, Underline, StrikeOut, ScaleX, ScaleY, Spacing, Angle, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding
+Style: TikTokKaraoke,Arial,{font_size},&H00FFFFFF,&H0000FFFF,&H00000000,&H80000000,-1,0,0,0,100,100,1,0,1,4.5,2.0,2,30,30,{margin_v},1
+
+[Events]
+Format: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text
+"""
+        dialogues = []
+        scenes = script.get("scenes", [])
+        current_time = 0.0
+
+        for i, scene in enumerate(scenes):
+            duration = scene_durations[i] if i < len(scene_durations) else float(scene.get("duration", 5.0))
+            base = float(scene_start_times[i]) if scene_start_times and i < len(scene_start_times) else current_time
+            narration = scene.get("narration", "").strip()
+            if not narration:
+                current_time = base + duration
+                continue
+            script_words = narration.split()
+
+            audio = scene_audios[i] if i < len(scene_audios) else ""
+            heard = self.transcribe_words(audio, language=language) if audio else []
+            timed = self._map_script_words_to_timings(script_words, heard)
+            has_timing = any(w["start"] >= 0 for w in timed)
+
+            # Gom 4 từ/chunk như generate_tiktok_ass để nhịp hiển thị quen thuộc.
+            chunk_size = 4
+            for c_i in range(0, len(timed), chunk_size):
+                chunk = timed[c_i:c_i + chunk_size]
+                if has_timing:
+                    t_start = base + max(0.0, chunk[0]["start"])
+                    # Từ cuối chunk: cộng thêm 60% khoảng nghỉ tới từ tiếp theo (tối đa +0.6s)
+                    if c_i + chunk_size < len(timed):
+                        gap = max(0.0, timed[c_i + chunk_size]["start"] - chunk[-1]["end"])
+                        t_end = base + chunk[-1]["end"] + min(0.6, gap * 0.6)
+                    else:
+                        t_end = base + chunk[-1]["end"] + 0.25
+                    t_end = min(t_end, base + duration - 0.02)
+                    parts = []
+                    for w in chunk:
+                        cs = max(1, int(round((w["end"] - w["start"]) * 100)))
+                        parts.append(f"{{\\k{cs}}}{w['word']}")
+                    text = " ".join(parts)
+                else:
+                    # Fallback: chia đều thời lượng scene.
+                    total_chunks = (len(timed) + chunk_size - 1) // chunk_size
+                    k = c_i // chunk_size
+                    chunk_dur = duration / max(1, total_chunks)
+                    t_start = base + k * chunk_dur
+                    t_end = base + (k + 1) * chunk_dur
+                    if k == total_chunks - 1:
+                        t_end = min(t_end, base + duration - 0.05)
+                    text = " ".join(w["word"] for w in chunk).upper()
+                dialogues.append(
+                    f"Dialogue: 0,{self.format_ass_timestamp(t_start)},"
+                    f"{self.format_ass_timestamp(t_end)},TikTokKaraoke,,0,0,0,,{text}"
+                )
+            current_time = base + duration
+
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write(ass_header + "\n".join(dialogues) + "\n")
+        logger.success(f"✅ Đã tạo phụ đề karaoke word-level: {out_path}")
+        return str(out_path)
+
     # Style configuration map for Pillow fallback overlay
     STYLE_CONFIG = {
         "TikTokYellow": {
