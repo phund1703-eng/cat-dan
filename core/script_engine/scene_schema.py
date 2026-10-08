@@ -11,7 +11,7 @@ Stage 6 — story beats (kể chuyện theo nhịp lời thoại):
             "narration_part": "trích nguyên văn một cụm lời thoại của beat",
             "elements": [
                 {"role": "focal|secondary|prop|label", "keyword": "white blood cell",
-                 "action": "enter|exit|emphasize|swap_pose|approach|absorb",
+                 "action": "enter|exit|emphasize|swap_pose|approach|absorb|attack|pulse|flow|divide|block",
                  "from": "left|right|top|bottom", "to": "left|right|top|bottom",
                  "pose": "ten tu the (chi dung voi swap_pose)",
                  "target": "keyword nhan vat bi tiep can (chi dung voi approach)"}
@@ -77,7 +77,8 @@ def normalize_script_scenes(script: Any) -> Any:
 # Stage 6 — story beats
 # ---------------------------------------------------------------------------
 
-BEAT_ACTIONS = ("enter", "exit", "emphasize", "swap_pose", "approach", "absorb")
+BEAT_ACTIONS = ("enter", "exit", "emphasize", "swap_pose", "approach", "absorb",
+                "attack", "pulse", "flow", "divide", "block")
 BEAT_ROLES = ("focal", "secondary", "prop", "label")
 BEAT_DIRECTIONS = ("left", "right", "top", "bottom")
 MAX_BEATS = 6
@@ -94,7 +95,7 @@ def normalize_beat_element(el: Any) -> Dict[str, str]:
     """Coerces one raw beat element into the canonical element dict shape."""
     if not isinstance(el, dict):
         return {"role": "prop", "keyword": "", "action": "enter",
-                "from": "left", "to": "right", "pose": "", "target": ""}
+                "from": "left", "to": "right", "pose": "", "target": "", "rate": ""}
     role = str(el.get("role") or "prop").strip().lower()
     action = str(el.get("action") or "enter").strip().lower()
     from_dir = str(el.get("from") or "left").strip().lower()
@@ -107,6 +108,7 @@ def normalize_beat_element(el: Any) -> Dict[str, str]:
         "to": to_dir if to_dir in BEAT_DIRECTIONS else "right",
         "pose": str(el.get("pose") or "").strip(),
         "target": str(el.get("target") or "").strip(),
+        "rate": str(el.get("rate") or "").strip(),
     }
 
 
@@ -264,4 +266,70 @@ def normalize_beats(scene: Any) -> Any:
     if not beats:
         beats = build_heuristic_beats(scene)
     scene["beats"] = beats
+    enrich_beats_with_verbs(scene)
+    return scene
+
+
+# ---------------------------------------------------------------------------
+# Stage 6 — tự động chèn beat_action từ từ điển động từ
+# ---------------------------------------------------------------------------
+
+# Động từ "tự thân" (không cần quan hệ chủ-khách): an toàn để tự gắn vào
+# nhân vật sẵn có. Động từ quan hệ (attack/approach/block/flow/enter/exit)
+# để LLM quyết định qua prompt (cần hiểu chủ thể/đối tượng).
+_AUTO_ATTACH_ROLE = {
+    "pulse": "focal_first",      # tim đập, phổi thở -> nhân vật chính
+    "emphasize": "focal_first",  # viêm, sưng, run rẩy
+    "divide": "focal_first",     # tế bào phân bào
+    "absorb": "secondary_first", # ruột hấp thụ / bạch cầu thực bào -> đối tượng bị hấp thụ
+}
+
+
+def enrich_beats_with_verbs(scene: Any) -> Any:
+    """
+    Tra mỗi narration_part trong từ điển động từ (khớp nhanh, không LLM):
+    nếu câu chứa động từ sinh lý có beat_action mà beat chưa có action đó,
+    chèn thêm element cùng nhân vật với action đó.
+
+    - Không tạo nhân vật mới, không sửa element sẵn có (idempotent).
+    - absorb gắn vào secondary (đối tượng bị hấp thụ), các action khác gắn
+      vào focal.
+    - Không bao giờ raise: lỗi thì giữ nguyên beats.
+    """
+    if not isinstance(scene, dict):
+        return scene
+    try:
+        from core.script_engine.verb_semantic_matcher import suggest_beat_action
+    except Exception:
+        return scene
+    try:
+        for beat in scene.get("beats") or []:
+            if not isinstance(beat, dict):
+                continue
+            suggestion = suggest_beat_action(beat.get("narration_part") or "")
+            if not suggestion:
+                continue
+            ba = suggestion["beat_action"]
+            if ba not in _AUTO_ATTACH_ROLE:
+                continue
+            elements = beat.get("elements") or []
+            if any((e.get("action") or "") == ba for e in elements):
+                continue
+            focal_el = next((e for e in elements
+                             if e.get("role") == "focal" and (e.get("keyword") or "").strip()), None)
+            sec_el = next((e for e in elements
+                           if e.get("role") == "secondary" and (e.get("keyword") or "").strip()), None)
+            host = sec_el if _AUTO_ATTACH_ROLE[ba] == "secondary_first" else focal_el
+            if host is None:
+                host = focal_el or sec_el
+            if host is None:
+                continue
+            elements.append({
+                "role": host.get("role"), "keyword": host.get("keyword"),
+                "action": ba, "from": "left", "to": "right",
+                "pose": "", "target": "", "rate": "",
+            })
+            beat["elements"] = elements
+    except Exception:
+        pass
     return scene

@@ -25,7 +25,8 @@ CATEGORY_MIN_COUNTS = {
     "FORCE_DEFORMATION": 80,
     "EMISSION_SPAWNING": 75,
     "LOCOMOTION_NAVIGATION": 70,
-    "OBSERVATION_ASSEMBLY": 80
+    "OBSERVATION_ASSEMBLY": 80,
+    "PHYSIOLOGY_VITAL": 30,
 }
 
 def test_dictionary():
@@ -46,7 +47,8 @@ def test_dictionary():
         "FORCE_DEFORMATION": 0,
         "EMISSION_SPAWNING": 0,
         "LOCOMOTION_NAVIGATION": 0,
-        "OBSERVATION_ASSEMBLY": 0
+        "OBSERVATION_ASSEMBLY": 0,
+        "PHYSIOLOGY_VITAL": 0
     }
 
     errors = []

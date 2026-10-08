@@ -97,11 +97,12 @@ class BeatChoreographer:
                 target_by_keyword[keyword] = target
                 cast[target] = self._make_cast_entry(target, role, keyword)
 
-        # Lượt 1b: đăng ký keyword chỉ xuất hiện trong "target" của approach
-        # (có vị trí để tính điểm đến; mặc định ẩn vì không có action enter).
+        # Lượt 1b: đăng ký keyword chỉ xuất hiện trong "target" của
+        # approach/attack/block (có vị trí để tính điểm đến; mặc định ẩn
+        # vì không có action enter riêng).
         for beat in beats:
             for el in beat.get("elements") or []:
-                if str(el.get("action") or "") != "approach":
+                if str(el.get("action") or "") not in ("approach", "attack", "block"):
                     continue
                 approached = str(el.get("target") or "").strip()
                 if approached and approached not in target_by_keyword:
@@ -188,9 +189,33 @@ class BeatChoreographer:
     def _to_px(self, norm_pos: List[float]) -> List[float]:
         return [float(norm_pos[0]) * self.width, float(norm_pos[1]) * self.height]
 
-    def _offscreen_px(self, direction: str, rest_px: List[float]) -> List[float]:
-        dx, dy = _OFFSCREEN.get(direction, _OFFSCREEN["right"])
-        return [rest_px[0] + dx * self.width, rest_px[1] + dy * self.height]
+    def _resolve_other_target(self, el, target, cast, target_by_keyword):
+        """Tìm target id của nhân vật được nhắm tới (el['target'] là keyword)."""
+        approached_kw = str(el.get("target") or "").strip()
+        other = target_by_keyword.get(approached_kw)
+        if other is None or other == target:
+            other = next((tid for tid in cast if tid != target), None)
+        return other
+
+    def _move_toward(self, target, rest_px, dest_id, cast, bstart,
+                     gap=260.0, dur=1.1, tilt=12.0, wave=20.0):
+        """Sinh TRANSLATE_NAV tiến tới gần dest_id, dừng cách `gap` px."""
+        dest_px = self._to_px(cast[dest_id]["position"])
+        dx, dy = dest_px[0] - rest_px[0], dest_px[1] - rest_px[1]
+        dist = max(1.0, (dx * dx + dy * dy) ** 0.5)
+        stop = max(0.0, dist - gap) / dist
+        end_px = [rest_px[0] + dx * stop, rest_px[1] + dy * stop]
+        t0 = round(bstart + 0.05, 3)
+        return {
+            "target": target,
+            "action": "TRANSLATE_NAV",
+            "time_range": [t0, round(t0 + dur, 3)],
+            "start_pos": [round(rest_px[0], 1), round(rest_px[1], 1)],
+            "end_pos": [round(end_px[0], 1), round(end_px[1], 1)],
+            "steps": 5,
+            "max_tilt_deg": tilt,
+            "wave_amplitude": wave,
+        }
 
     def _actions_for(
         self,
@@ -246,32 +271,80 @@ class BeatChoreographer:
             }]
         if action == "approach":
             # Tiến lại gần nhân vật khác: trượt tới điểm cách mục tiêu ~260px.
-            approached_kw = str(el.get("target") or "").strip()
-            approached_id = target_by_keyword.get(approached_kw)
-            if approached_id is None or approached_id == target:
-                # Không xác định được mục tiêu: chọn nhân vật khác đầu tiên.
-                approached_id = next(
-                    (tid for tid in cast if tid != target), None)
-            if approached_id is None:
+            dest_id = self._resolve_other_target(el, target, cast, target_by_keyword)
+            if dest_id is None:
                 return []
-            dest_norm = cast[approached_id]["position"]
-            dest_px = self._to_px(dest_norm)
-            dx, dy = dest_px[0] - rest_px[0], dest_px[1] - rest_px[1]
-            dist = max(1.0, (dx * dx + dy * dy) ** 0.5)
-            gap = 260.0
-            stop = max(0.0, dist - gap) / dist
-            end_px = [rest_px[0] + dx * stop, rest_px[1] + dy * stop]
+            return [self._move_toward(target, rest_px, dest_id, cast, bstart)]
+        if action == "attack":
+            # Tấn công: lao tới + va chạm khiến đối phương rung (squash).
+            dest_id = self._resolve_other_target(el, target, cast, target_by_keyword)
+            if dest_id is None:
+                return []
             t0 = round(bstart + 0.05, 3)
+            impact = round(t0 + 0.7, 3)
+            return [
+                self._move_toward(target, rest_px, dest_id, cast, bstart,
+                                  gap=140.0, dur=0.7, tilt=18.0, wave=10.0),
+                {"target": dest_id, "action": "COMPRESS_SQUASH",
+                 "time_range": [impact, round(impact + 0.25, 3)],
+                 "scale_x": 1.28, "scale_y": 0.8, "steps": 2},
+                {"target": dest_id, "action": "COMPRESS_SQUASH",
+                 "time_range": [round(impact + 0.25, 3), round(impact + 0.5, 3)],
+                 "scale_x": 1.0, "scale_y": 1.0, "steps": 2},
+            ]
+        if action == "pulse":
+            # Đập/co bóp theo nhịp lặp (tim đập, mạch đập).
+            try:
+                rate = float(el.get("rate") or 1.1)
+            except (TypeError, ValueError):
+                rate = 1.1
+            rate = min(3.0, max(0.4, rate))
+            return [{
+                "target": target,
+                "action": "PULSE",
+                "time_range": [round(bstart + 0.05, 3), round(bend - 0.05, 3)],
+                "pulses_per_sec": rate,
+                "scale_max": 1.18,
+                "steps": 2,
+            }]
+        if action == "flow":
+            # Chảy thành dòng: trượt xuyên khung từ phía "from" sang phía "to".
+            frm = str(el.get("from") or "left")
+            to = str(el.get("to") or "right")
+            dx0, dy0 = _OFFSCREEN.get(frm, _OFFSCREEN["left"])
+            dx1, dy1 = _OFFSCREEN.get(to, _OFFSCREEN["right"])
+            t0 = round(bstart, 3)
             return [{
                 "target": target,
                 "action": "TRANSLATE_NAV",
-                "time_range": [t0, round(t0 + 1.1, 3)],
-                "start_pos": [round(rest_px[0], 1), round(rest_px[1], 1)],
-                "end_pos": [round(end_px[0], 1), round(end_px[1], 1)],
-                "steps": 5,
-                "max_tilt_deg": 12.0,
-                "wave_amplitude": 20.0,
+                "time_range": [t0, round(bend, 3)],
+                "start_pos": [round(rest_px[0] + dx0 * self.width, 1),
+                              round(rest_px[1] + dy0 * self.height, 1)],
+                "end_pos": [round(rest_px[0] + dx1 * self.width, 1),
+                            round(rest_px[1] + dy1 * self.height, 1)],
+                "steps": 6,
+                "max_tilt_deg": 6.0,
+                "wave_amplitude": 25.0,
             }]
+        if action == "divide":
+            # Phân chia: tách đôi rồi dạt ra (phân bào).
+            return [{
+                "target": target,
+                "action": "SEVER_SHATTER",
+                "impact_time": round(bstart + 0.4, 3),
+                "drift_direction": [0.7, 0.15],
+                "max_drift_px": 200.0,
+                "tilt_deg": 18.0,
+                "duration": 0.9,
+                "steps": 3,
+            }]
+        if action == "block":
+            # Tụ lại chặn một điểm (đông máu, tắc mạch): tiến sát mục tiêu và ở lại.
+            dest_id = self._resolve_other_target(el, target, cast, target_by_keyword)
+            if dest_id is None:
+                return []
+            return [self._move_toward(target, rest_px, dest_id, cast, bstart,
+                                      gap=50.0, dur=1.2, tilt=6.0, wave=8.0)]
         if action == "absorb":
             # Bị nuốt chửng: teo dần rồi biến mất (kẻ săn "ăn" con mồi).
             return [{

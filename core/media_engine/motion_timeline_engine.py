@@ -12,6 +12,7 @@ Bộ 11 động cơ chuyển động vật lý hoàn chỉnh ở nhịp stop-mot
 9. ENGINE_SWAP_ASSET      : Đổi tư thế / Đổi asset giữa chừng (nhân vật đổi pose theo beat, Step 6 Stage 6)
 10. ENGINE_EXIT_SLIDE     : Trượt ra khỏi khung & Ẩn (element trượt theo hướng rồi visible=False)
 11. ENGINE_POP_IN         : Nảy vào (pop-in overshoot 0 -> 1 theo nấc stop-motion)
+12. ENGINE_PULSE          : Nhịp đập lặp (tim đập / mạch đập: phồng-xẹp theo nhịp, nấc stop-motion)
 """
 
 import math
@@ -21,10 +22,10 @@ from loguru import logger
 
 class MotionTimelineEngine:
     """
-    Bộ điều phối chuyển động vật lý 12fps cho 11 động cơ chuyển động phổ quát.
+    Bộ điều phối chuyển động vật lý 12fps cho 12 động cơ chuyển động phổ quát.
     """
 
-    # Danh mục tên 11 động cơ chuẩn
+    # Danh mục tên 12 động cơ chuẩn
     ENGINE_COMPRESS_SQUASH = "ENGINE_COMPRESS_SQUASH"
     ENGINE_SEVER_SHATTER = "ENGINE_SEVER_SHATTER"
     ENGINE_EMIT_SLIDE = "ENGINE_EMIT_SLIDE"
@@ -36,6 +37,7 @@ class MotionTimelineEngine:
     ENGINE_SWAP_ASSET = "ENGINE_SWAP_ASSET"
     ENGINE_EXIT_SLIDE = "ENGINE_EXIT_SLIDE"
     ENGINE_POP_IN = "ENGINE_POP_IN"
+    ENGINE_PULSE = "ENGINE_PULSE"
 
     # Hướng trượt cho EXIT_SLIDE (đơn vị: bội số kích thước khung hình)
     EXIT_DIRECTIONS = {
@@ -302,6 +304,36 @@ class MotionTimelineEngine:
     apply_discrete_translate = apply_translate_nav
 
     # =========================================================================
+    # ĐỘNG CƠ 12: PULSE (Nhịp đập lặp: tim đập / mạch đập / co bóp)
+    # =========================================================================
+    @classmethod
+    def apply_pulse(
+        cls,
+        t: float,
+        time_range: Tuple[float, float],
+        pulses_per_sec: float = 1.1,
+        scale_min: float = 1.0,
+        scale_max: float = 1.18,
+        steps_per_pulse: int = 2,
+        base_scale_x: float = 1.0,
+        base_scale_y: float = 1.0,
+    ) -> Tuple[float, float]:
+        """
+        Returns: (scale_x, scale_y) — phồng-xẹp theo nhịp, lượng tử hoá theo
+        nấc stop-motion. Ngoài time_range: giữ nguyên scale gốc.
+        """
+        t0, t1 = time_range
+        if t < t0 or t >= t1:
+            return float(base_scale_x), float(base_scale_y)
+        cyc = ((t - t0) * pulses_per_sec) % 1.0
+        q = math.floor(cyc * steps_per_pulse) / max(1, steps_per_pulse)
+        thump = math.sin(math.pi * min(1.0, q)) ** 2
+        amp = max(0.0, scale_max - scale_min)
+        sx = base_scale_x * (1.0 + amp * thump)
+        sy = base_scale_y * (1.0 + amp * thump)
+        return float(sx), float(sy)
+
+    # =========================================================================
     # Helper: nảy overshoot (dùng cho POP_IN)
     # =========================================================================
     @staticmethod
@@ -370,7 +402,7 @@ class MotionTimelineEngine:
     def get_frame_state(self, t: float, frame_idx: int = 0, width: int = 1080, height: int = 1920) -> Dict[str, Any]:
         """
         Tính toán trạng thái tất cả các đối tượng (hero, secondary, action assets...)
-        cho frame hiện tại theo đúng chỉ định của 8 Động Cơ Chuyển Động.
+        cho frame hiện tại theo đúng chỉ định của 12 Động Cơ Chuyển Động.
         """
         states: Dict[str, Dict[str, Any]] = {}
 
@@ -395,7 +427,7 @@ class MotionTimelineEngine:
                 "asset_variant": str(cfg.get("asset_variant") or "")
             }
 
-        # 2. Duyệt qua timeline để cập nhật theo 11 Động Cơ
+        # 2. Duyệt qua timeline để cập nhật theo 12 Động Cơ
         for act in self.timeline:
             target = act.get("target")
             action_type = act.get("action", "").upper()
@@ -643,6 +675,23 @@ class MotionTimelineEngine:
                 st["visible"] = bool(vis)
                 st["scale_x"] = float(sc)
                 st["scale_y"] = float(sc)
+
+            # -----------------------------------------------------------------
+            # 12. ENGINE_PULSE (Nhịp đập lặp: tim đập / mạch đập / co bóp)
+            # -----------------------------------------------------------------
+            elif action_type in [self.ENGINE_PULSE, "PULSE"]:
+                time_range = act.get("time_range", [1.0, 3.0])
+                pps = float(act.get("pulses_per_sec", 1.1))
+                smax = float(act.get("scale_max", 1.18))
+                steps = int(act.get("steps", 2))
+                sx, sy = self.apply_pulse(
+                    t, (float(time_range[0]), float(time_range[1])),
+                    pulses_per_sec=pps, scale_max=smax,
+                    base_scale_x=st["scale_x"], base_scale_y=st["scale_y"],
+                    steps_per_pulse=steps,
+                )
+                st["scale_x"] = float(sx)
+                st["scale_y"] = float(sy)
 
             # -----------------------------------------------------------------
             # ROTATE_STEP (Legacy)

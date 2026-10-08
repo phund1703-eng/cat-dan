@@ -459,3 +459,48 @@ Trả về định dạng JSON DUY NHẤT:
 
         scene_layout["timeline"] = timeline_actions
         return scene_layout
+
+
+# ---------------------------------------------------------------------------
+# Stage 6 — singleton + gợi ý beat_action cho story beats
+# ---------------------------------------------------------------------------
+_matcher_singleton = None
+_matcher_init_tried = False
+
+
+def get_matcher() -> Optional["VerbSemanticMatcher"]:
+    """Singleton lười: nạp từ điển 1 lần, trả None khi từ điển lỗi/thiếu."""
+    global _matcher_singleton, _matcher_init_tried
+    if not _matcher_init_tried:
+        _matcher_init_tried = True
+        try:
+            m = VerbSemanticMatcher()
+            _matcher_singleton = m if m.dictionary else None
+        except Exception as e:
+            logger.warning(f"get_matcher: không nạp được từ điển động từ ({e})")
+            _matcher_singleton = None
+    return _matcher_singleton
+
+
+def suggest_beat_action(narration_part: str) -> Optional[Dict[str, Any]]:
+    """
+    Gợi ý beat_action cho 1 cụm lời thoại từ từ điển động từ (tầng 1: khớp nhanh).
+    Trả về {"phrase", "beat_action", "verb_vi", "category"} hoặc None.
+    Chỉ gợi ý khi entry có beat_action (bỏ qua 320 động từ cơ khí cũ).
+    """
+    matcher = get_matcher()
+    if matcher is None or not (narration_part or "").strip():
+        return None
+    hit = matcher.match_fast(narration_part)
+    if not hit:
+        return None
+    phrase, entry = hit
+    beat_action = str(entry.get("beat_action") or "").strip()
+    if not beat_action:
+        return None
+    return {
+        "phrase": phrase,
+        "beat_action": beat_action,
+        "verb_vi": entry.get("verb_vi", ""),
+        "category": entry.get("category", ""),
+    }

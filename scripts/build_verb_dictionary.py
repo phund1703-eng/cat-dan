@@ -19,7 +19,8 @@ OUTPUT_FILE = DATA_DIR / "verb_kinetic_dictionary.json"
 VERBS_DATA = []
 
 def add_verb(verb_vi, synonyms, category, domain_tags, motion_type, hero_action, hero_dir, hero_steps, hero_easing,
-             target_action, target_sx, target_sy, target_steps, target_delay, action_assets, shake_screen=True, shake_amp=1.5):
+             target_action, target_sx, target_sy, target_steps, target_delay, action_assets, shake_screen=True, shake_amp=1.5,
+             beat_action=""):
     VERBS_DATA.append({
         "verb_vi": verb_vi,
         "synonyms": synonyms,
@@ -43,7 +44,8 @@ def add_verb(verb_vi, synonyms, category, domain_tags, motion_type, hero_action,
         "tactile_impact": {
             "shake_screen": shake_screen,
             "shake_amplitude": shake_amp
-        }
+        },
+        "beat_action": beat_action,
     })
 
 # ==============================================================================
@@ -874,6 +876,153 @@ n4_vay_bat = [
 # Nạp nhóm 4
 for item in (n4_quan_sat + n4_hoa_sinh + n4_lap_rap + n4_vay_bat):
     add_verb(*item)
+
+# ==============================================================================
+# NHÓM 5: SINH LÝ NGƯỜI (Human Physiology) — Stage 6 mở rộng
+# Động từ cốt lõi của video y học / sinh học cơ thể người, ánh xạ sang
+# beat_action của story beats để mọi video diễn đồng nhất.
+# ==============================================================================
+n5_tim_mach = [
+    ("bơm", ["bơm máu"], "PHYSIOLOGY_VITAL", ["cardiology", "physiology"], "PUMP_PRESSURE",
+     "SQUASH_AND_STRETCH", [0.0, 0.0], 2, "PHYSICAL_BOUNCE", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "pulse"),
+    ("tim đập", ["đập thình thịch", "đập rộn ràng"], "PHYSIOLOGY_VITAL", ["cardiology", "physiology"], "HEARTBEAT_PULSE",
+     "SQUASH_AND_STRETCH", [0.0, 0.0], 2, "PHYSICAL_BOUNCE", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "pulse"),
+    ("co bóp", ["bóp nhịp nhàng", "co bóp nhịp nhàng"], "PHYSIOLOGY_VITAL", ["cardiology", "physiology", "gastroenterology"], "RHYTHMIC_CONTRACTION",
+     "SQUASH_AND_STRETCH", [0.0, 0.0], 2, "PHYSICAL_BOUNCE", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "pulse"),
+    ("đập nhanh", ["tim đập nhanh", "đập dồn dập"], "PHYSIOLOGY_VITAL", ["cardiology"], "TACHYCARDIA_RAPID",
+     "SQUASH_AND_STRETCH", [0.0, 0.0], 2, "PHYSICAL_BOUNCE", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "pulse"),
+    ("tuần hoàn", ["lưu thông", "máu lưu thông"], "PHYSIOLOGY_VITAL", ["cardiology", "physiology"], "BLOOD_CIRCULATION",
+     "DISCRETE_TRANSLATE", [1.0, 0.0], 4, "LINEAR_STEP", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "flow"),
+    ("máu chảy", ["dòng máu chảy"], "PHYSIOLOGY_VITAL", ["cardiology", "physiology"], "BLOOD_FLOW",
+     "DISCRETE_TRANSLATE", [1.0, 0.0], 4, "LINEAR_STEP", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "flow"),
+    ("đông máu", ["đông lại", "máu đông"], "PHYSIOLOGY_VITAL", ["hematology", "medicine"], "CLOT_FORMATION",
+     "DISCRETE_TRANSLATE", [0.0, 0.0], 3, "LINEAR_STEP", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "block"),
+    ("tắc mạch", ["tắc nghẽn", "nghẽn mạch"], "PHYSIOLOGY_VITAL", ["cardiology", "medicine"], "VESSEL_OCCLUSION",
+     "DISCRETE_TRANSLATE", [0.0, 0.0], 3, "LINEAR_STEP", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "block"),
+    ("vỡ mạch", ["vỡ mạch máu"], "PHYSIOLOGY_VITAL", ["cardiology", "medicine"], "VESSEL_RUPTURE",
+     "DISCRETE_TRANSLATE", [0.0, 0.0], 3, "PHYSICAL_BOUNCE", "CRACK", 1.2, 0.8, 2, 0.2, [],
+     True, 1.5, "divide"),
+]
+
+n5_ho_hap = [
+    ("thở", ["hít thở"], "PHYSIOLOGY_VITAL", ["pulmonology", "physiology"], "BREATH_CYCLE",
+     "SQUASH_AND_STRETCH", [0.0, 0.0], 2, "PHYSICAL_BOUNCE", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "pulse"),
+    ("hít vào", ["hít khí"], "PHYSIOLOGY_VITAL", ["pulmonology"], "INHALE_FLOW",
+     "DISCRETE_TRANSLATE", [0.0, 1.0], 3, "LINEAR_STEP", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "flow"),
+    ("thở ra", ["thải khí"], "PHYSIOLOGY_VITAL", ["pulmonology"], "EXHALE_FLOW",
+     "DISCRETE_TRANSLATE", [0.0, -1.0], 3, "LINEAR_STEP", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "flow"),
+    ("trao đổi khí", ["trao đổi oxy"], "PHYSIOLOGY_VITAL", ["pulmonology", "physiology"], "GAS_EXCHANGE",
+     "DISCRETE_TRANSLATE", [1.0, 0.0], 3, "LINEAR_STEP", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "flow"),
+]
+
+n5_tieu_hoa = [
+    ("nuốt", ["nuốt chửng"], "PHYSIOLOGY_VITAL", ["gastroenterology", "physiology"], "SWALLOW_ENGULF",
+     "DISCRETE_TRANSLATE", [0.0, 1.0], 3, "PHYSICAL_BOUNCE", "SHRINK_AND_DISAPPEAR", 0.9, 0.9, 2, 0.2, [],
+     False, 1.5, "absorb"),
+    ("nhào trộn", ["nghiền thức ăn"], "PHYSIOLOGY_VITAL", ["gastroenterology"], "CHURN_MIX",
+     "SQUASH_AND_STRETCH", [0.0, 0.0], 3, "PHYSICAL_BOUNCE", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "pulse"),
+    ("tiêu hóa", ["phân giải thức ăn"], "PHYSIOLOGY_VITAL", ["gastroenterology"], "DIGEST_DISSOLVE",
+     "DISCRETE_TRANSLATE", [0.0, 0.0], 3, "LINEAR_STEP", "SHRINK_AND_DISAPPEAR", 0.9, 0.9, 3, 0.3, [],
+     False, 1.5, "absorb"),
+    ("hấp thụ", ["hấp thu"], "PHYSIOLOGY_VITAL", ["gastroenterology", "physiology"], "ABSORB_UPTAKE",
+     "DISCRETE_TRANSLATE", [0.0, 0.0], 3, "LINEAR_STEP", "SHRINK_AND_DISAPPEAR", 0.9, 0.9, 3, 0.3, [],
+     False, 1.5, "absorb"),
+    ("đẩy thức ăn", ["nhu động ruột"], "PHYSIOLOGY_VITAL", ["gastroenterology"], "PERISTALSIS_WAVE",
+     "DISCRETE_TRANSLATE", [1.0, 0.0], 4, "LINEAR_STEP", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "flow"),
+]
+
+n5_bai_tiet = [
+    ("lọc máu", ["lọc"], "PHYSIOLOGY_VITAL", ["nephrology", "physiology"], "FILTER_FLOW",
+     "DISCRETE_TRANSLATE", [0.0, 1.0], 3, "LINEAR_STEP", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "flow"),
+    ("thải độc", ["đào thải"], "PHYSIOLOGY_VITAL", ["nephrology", "medicine"], "DETOX_EXPEL",
+     "DISCRETE_TRANSLATE", [0.0, 1.0], 3, "LINEAR_STEP", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "exit"),
+    ("thải", ["thải ra"], "PHYSIOLOGY_VITAL", ["physiology", "general"], "EXCRETE_RELEASE",
+     "DISCRETE_TRANSLATE", [1.0, 0.0], 3, "LINEAR_STEP", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "exit"),
+]
+
+n5_than_kinh = [
+    ("dẫn truyền", ["truyền tín hiệu"], "PHYSIOLOGY_VITAL", ["neurology", "physiology"], "NERVE_CONDUCT",
+     "DISCRETE_TRANSLATE", [1.0, 0.0], 4, "LINEAR_STEP", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "flow"),
+    ("lan truyền", ["lan tỏa"], "PHYSIOLOGY_VITAL", ["neurology", "general"], "SIGNAL_SPREAD",
+     "DISCRETE_TRANSLATE", [1.0, 0.0], 3, "LINEAR_STEP", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "flow"),
+    ("phát tín hiệu thần kinh", ["báo động"], "PHYSIOLOGY_VITAL", ["neurology", "immunology"], "SIGNAL_EMIT",
+     "SQUASH_AND_STRETCH", [0.0, 0.0], 2, "PHYSICAL_BOUNCE", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "emphasize"),
+]
+
+n5_mien_dich = [
+    ("bảo vệ", ["che chắn"], "PHYSIOLOGY_VITAL", ["immunology", "medicine"], "DEFEND_BLOCK",
+     "DISCRETE_TRANSLATE", [0.0, 0.0], 3, "LINEAR_STEP", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "block"),
+    ("viêm", ["sưng viêm"], "PHYSIOLOGY_VITAL", ["immunology", "medicine"], "INFLAME_SWELL",
+     "SQUASH_AND_STRETCH", [0.0, 0.0], 3, "PHYSICAL_BOUNCE", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "emphasize"),
+    ("sưng", ["phồng"], "PHYSIOLOGY_VITAL", ["immunology", "general"], "SWELL_GROW",
+     "SQUASH_AND_STRETCH", [0.0, 0.0], 3, "PHYSICAL_BOUNCE", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "emphasize"),
+]
+
+n5_chung = [
+    ("co cơ", ["co lại"], "PHYSIOLOGY_VITAL", ["physiology", "sports"], "MUSCLE_CONTRACT",
+     "SQUASH_AND_STRETCH", [0.0, 0.0], 3, "PHYSICAL_BOUNCE", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "emphasize"),
+    ("vận chuyển", ["chở"], "PHYSIOLOGY_VITAL", ["physiology", "hematology"], "TRANSPORT_CARRY",
+     "DISCRETE_TRANSLATE", [1.0, 0.0], 4, "LINEAR_STEP", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "flow"),
+    ("lành", ["hồi phục"], "PHYSIOLOGY_VITAL", ["medicine", "general"], "HEAL_RESTORE",
+     "SQUASH_AND_STRETCH", [0.0, 0.0], 2, "PHYSICAL_BOUNCE", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "emphasize"),
+    ("chết dần", ["tế bào chết"], "PHYSIOLOGY_VITAL", ["cell_biology", "medicine"], "APOPTOSIS_FADE",
+     "DISCRETE_TRANSLATE", [0.0, 0.0], 3, "LINEAR_STEP", "SHRINK_AND_DISAPPEAR", 0.9, 0.9, 3, 0.3, [],
+     False, 1.5, "absorb"),
+    ("mọc", ["mọc lên"], "PHYSIOLOGY_VITAL", ["physiology", "general"], "GROW_SPROUT",
+     "SCALE_REVEAL", [0.0, 0.0], 3, "PHYSICAL_BOUNCE", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "enter"),
+    ("ngấm", ["thấm"], "PHYSIOLOGY_VITAL", ["pharmacology", "general"], "SOAK_ABSORB",
+     "DISCRETE_TRANSLATE", [0.0, 0.0], 3, "LINEAR_STEP", "SHRINK_AND_DISAPPEAR", 0.95, 0.95, 3, 0.3, [],
+     False, 1.5, "absorb"),
+    ("tiết ra", ["tiết hormone"], "PHYSIOLOGY_VITAL", ["endocrinology", "physiology"], "SECRETE_RELEASE",
+     "DISCRETE_TRANSLATE", [0.0, -1.0], 3, "LINEAR_STEP", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "flow"),
+    ("run rẩy", ["run"], "PHYSIOLOGY_VITAL", ["general", "physiology"], "TREMBLE_SHAKE",
+     "HOLD_JITTER", [0.0, 0.0], 4, "HOLD_JITTER", "NONE", 1.0, 1.0, 1, 0.0, [],
+     False, 1.5, "emphasize"),
+]
+
+# Nạp nhóm 5
+for item in (n5_tim_mach + n5_ho_hap + n5_tieu_hoa + n5_bai_tiet + n5_than_kinh + n5_mien_dich + n5_chung):
+    add_verb(*item)
+
+# Gán beat_action cho các entry cũ còn thiếu (giữ nguyên mọi trường khác)
+_BEAT_ACTION_PATCH = {
+    "nuốt chửng": "absorb",   # synonym: thực bào
+    "phân bào": "divide",
+    "tiến công": "attack",     # synonym: tấn công
+    "nhân đôi": "divide",
+    "săn mồi": "approach",
+}
+for _entry in VERBS_DATA:
+    if _entry["verb_vi"] in _BEAT_ACTION_PATCH and not _entry.get("beat_action"):
+        _entry["beat_action"] = _BEAT_ACTION_PATCH[_entry["verb_vi"]]
 
 # ==============================================================================
 # LƯU VÀO FILE JSON

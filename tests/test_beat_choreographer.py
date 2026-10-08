@@ -242,3 +242,92 @@ def test_absorb_emits_and_hides_via_engine():
     t0 = ab[0]["absorb_time"]
     assert engine.get_frame_state(t0 - 0.05)["secondary"]["visible"] is True
     assert engine.get_frame_state(t0 + 1.0)["secondary"]["visible"] is False
+
+
+def _physio_scene():
+    return {
+        "narration": "Tim đập. Máu chảy. Tế bào phân chia. Miễn dịch tấn công.",
+        "focal_keyword": "heart",
+        "secondary_keyword": "blood clot",
+        "beats": [
+            {"narration_part": "Tim đập.",
+             "elements": [{"role": "focal", "keyword": "heart",
+                           "action": "pulse", "rate": "1.2"}],
+             "emphasis_words": []},
+            {"narration_part": "Máu chảy.",
+             "elements": [{"role": "prop", "keyword": "red blood cell",
+                           "action": "flow", "from": "left", "to": "right"}],
+             "emphasis_words": []},
+            {"narration_part": "Tế bào phân chia.",
+             "elements": [{"role": "secondary", "keyword": "stem cell",
+                           "action": "divide"}],
+             "emphasis_words": []},
+            {"narration_part": "Miễn dịch tấn công.",
+             "elements": [{"role": "focal", "keyword": "white blood cell",
+                           "action": "attack", "target": "bacterium"},
+                          {"role": "secondary", "keyword": "bacterium",
+                           "action": "enter", "from": "right"}],
+             "emphasis_words": []},
+        ],
+    }
+
+
+def test_pulse_action_and_engine_oscillation():
+    out = CHOREO.choreograph(_physio_scene(), 12.0)
+    pa = [a for a in out["timeline"] if a["action"] == "PULSE"]
+    assert len(pa) == 1 and pa[0]["target"] == "hero"
+    assert pa[0]["pulses_per_sec"] == pytest.approx(1.2)
+    engine = MotionTimelineEngine(
+        timeline=out["timeline"],
+        base_configs={k: {"position": v["position"], "visible": v["visible"]}
+                      for k, v in out["cast"].items()},
+    )
+    t0, t1 = pa[0]["time_range"]
+    scales = [engine.get_frame_state(t0 + i * 0.1)["hero"]["scale_x"]
+              for i in range(int((t1 - t0) * 10))]
+    assert max(scales) > 1.05 and min(scales) == pytest.approx(1.0, abs=0.02)
+
+
+def test_flow_crosses_frame():
+    out = CHOREO.choreograph(_physio_scene(), 12.0)
+    fl = [a for a in out["timeline"]
+          if a["target"].startswith("action_") and a["action"] == "TRANSLATE_NAV"
+          and a["start_pos"][0] < 0]
+    assert len(fl) == 1
+    assert fl[0]["end_pos"][0] > 1080  # từ trái sang phải, xuyên khung
+
+
+def test_divide_emits_sever_shatter():
+    out = CHOREO.choreograph(_physio_scene(), 12.0)
+    dv = [a for a in out["timeline"] if a["action"] == "SEVER_SHATTER"]
+    assert len(dv) == 1 and dv[0]["target"] == "secondary"
+
+
+def test_attack_moves_attacker_and_squashes_victim():
+    out = CHOREO.choreograph(_physio_scene(), 12.0)
+    attacker = out["target_by_keyword"]["white blood cell"]
+    victim = out["target_by_keyword"]["bacterium"]
+    atk = [a for a in out["timeline"] if a["action"] == "TRANSLATE_NAV"
+           and a["target"] == attacker]
+    assert len(atk) == 1
+    sq = [a for a in out["timeline"] if a["action"] == "COMPRESS_SQUASH"
+          and a["target"] == victim]
+    assert len(sq) == 2  # nảy va chạm rồi về
+    assert sq[0]["scale_x"] > 1.0
+
+
+def test_block_converges_to_target():
+    scene = {"narration": "Tiểu cầu tụ lại bịt vết thương.",
+             "focal_keyword": "platelet", "secondary_keyword": "wound",
+             "beats": [{"narration_part": "Tiểu cầu tụ lại bịt vết thương.",
+                        "elements": [{"role": "focal", "keyword": "platelet",
+                                      "action": "block", "target": "wound"}],
+                        "emphasis_words": []}]}
+    out = CHOREO.choreograph(scene, 6.0)
+    bl = [a for a in out["timeline"] if a["action"] == "TRANSLATE_NAV"
+          and a["target"] == "hero"]
+    assert len(bl) == 1
+    wx, wy = out["cast"][out["target_by_keyword"]["wound"]]["position"]
+    ex, ey = bl[0]["end_pos"]
+    import math
+    assert math.hypot(ex - wx * 1080, ey - wy * 1920) < 120

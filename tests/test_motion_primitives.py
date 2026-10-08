@@ -103,3 +103,22 @@ def test_screen_shake_flag_does_not_crash_jitter():
     states = e.get_frame_state(3.9, frame_idx=2)  # vừa shake vừa jitter
     assert states.get("__screen_shake__") is True
     assert "position" in states["hero"]
+
+
+def test_pulse_beats_and_rests():
+    tl = [{"target": "hero", "action": "PULSE",
+           "time_range": [1.0, 3.0], "pulses_per_sec": 1.0,
+           "scale_max": 1.2, "steps": 4}]
+    e = _engine(tl)
+    assert e.get_frame_state(0.5)["hero"]["scale_x"] == pytest.approx(1.0)
+    scales = [e.get_frame_state(1.0 + i * 0.1)["hero"]["scale_x"] for i in range(20)]
+    assert max(scales) > 1.05  # có nhịp phồng
+    assert min(scales) == pytest.approx(1.0, abs=0.01)  # có nhịp xẹp về gốc
+    assert e.get_frame_state(3.5)["hero"]["scale_x"] == pytest.approx(1.0)
+
+
+def test_pulse_alias_engine_constant():
+    tl = [{"target": "hero", "action": "ENGINE_PULSE",
+           "time_range": [0.5, 2.5]}]
+    e = _engine(tl)
+    assert e.get_frame_state(1.0)["hero"]["scale_x"] >= 1.0
