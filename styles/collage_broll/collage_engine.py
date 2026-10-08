@@ -187,6 +187,7 @@ class CollageEngine:
                         focal_sticker_path=focal_sticker_path,
                         secondary_sticker_path=secondary_sticker_path,
                         output_path=raw_scene_clip,
+                        scene_media_path=scene_media or "",
                     )
                 except Exception as e_beats:
                     logger.warning(f"Beats render lỗi ({e_beats}), fallback về render_gbro_clip.")
@@ -314,6 +315,7 @@ class CollageEngine:
         focal_sticker_path: str,
         secondary_sticker_path: str,
         output_path: str,
+        scene_media_path: str = "",
     ) -> str:
         """
         Dựng 1 scene theo story beats (Stage 6):
@@ -384,6 +386,7 @@ class CollageEngine:
             duration=scene_duration,
             fps=12,
             pose_assets=pose_assets or None,
+            backdrop_path=scene_media_path or None,
         )
 
     @staticmethod

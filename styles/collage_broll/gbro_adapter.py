@@ -1831,6 +1831,7 @@ class GbroAdapter:
         duration: float = 5.0,
         fps: int = 12,
         pose_assets: Optional[Dict[str, Dict[str, str]]] = None,
+        backdrop_path: Optional[str] = None,
     ) -> str:
         """
         Dựng 1 scene từ output của BeatChoreographer.
@@ -1841,6 +1842,7 @@ class GbroAdapter:
                     (timeline/cast/beat_timing/labels).
             assets: {target: asset_path} — "hero", "secondary", "action_*".
             pose_assets: {target: {pose_name: asset_path}} cho SWAP_ASSET.
+            backdrop_path: ảnh nền xé (mặc định: procedural fallback của engine).
         """
         cast = choreo.get("cast", {}) or {}
         hero_pos = cast.get("hero", {}).get("position", [0.5, 0.16])
@@ -1867,6 +1869,8 @@ class GbroAdapter:
             "stage_prop": "floating",
             "timeline": choreo.get("timeline", []),
         }
+        if backdrop_path and os.path.exists(backdrop_path):
+            scene_layout["archival_backdrop"] = {"asset_path": backdrop_path}
         return self.render_multi_element_scene(
             scene_layout=scene_layout,
             hero_asset_path=(assets or {}).get("hero", ""),
