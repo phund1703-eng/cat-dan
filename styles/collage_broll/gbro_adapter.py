@@ -6,7 +6,7 @@ import subprocess
 import numpy as np
 from pathlib import Path
 from typing import Optional, Dict, Any, List, Tuple
-from PIL import Image, ImageDraw, ImageFilter, ImageEnhance, ImageChops, ImageOps
+from PIL import Image, ImageDraw, ImageFilter, ImageEnhance, ImageChops, ImageOps, ImageFont
 from loguru import logger
 
 # Add omni_scripts to path
@@ -842,6 +842,65 @@ class GbroAdapter:
 
 
 
+    def _style_cutout_file(self, asset_path: str, width: int, scale: float):
+        """Style 1 asset file thành paper cutout (viền kem + bóng đổ). Trả None nếu lỗi."""
+        try:
+            if not asset_path or not os.path.exists(asset_path):
+                return None
+            raw = Image.open(asset_path).convert("RGBA")
+            w = max(8, int(width * float(scale or 0.3)))
+            h = max(8, int(raw.height * (w / max(raw.width, 1))))
+            resized = raw.resize((w, h), Image.Resampling.LANCZOS)
+            return self.compositor.apply_paper_cutout_styling(
+                resized,
+                outline_width=9,
+                shadow_offset=(12, 14),
+                shadow_blur=10,
+                pad=55,
+                shadow_alpha=120,
+                outline_color=(255, 253, 247, 255)
+            )
+        except Exception as e:
+            logger.warning(f"Không style được pose variant {asset_path}: {e}")
+            return None
+
+    def _get_label_font(self, size: int):
+        """Font cho kinetic labels (cache theo size)."""
+        cache = getattr(self, "_label_font_cache", None)
+        if cache is None:
+            cache = self._label_font_cache = {}
+        if size not in cache:
+            repo_font = Path(__file__).resolve().parents[2] / "assets" / "fonts" / "BeVietnamPro-Bold.ttf"
+            try:
+                if repo_font.exists():
+                    cache[size] = ImageFont.truetype(str(repo_font), size)
+                else:
+                    cache[size] = ImageFont.truetype("DejaVuSans-Bold.ttf", size)
+            except Exception:
+                cache[size] = ImageFont.load_default()
+        return cache[size]
+
+    def _draw_kinetic_label(self, frame_img, text: str, pos_norm, dt: float,
+                            width: int, height: int,
+                            color=(200, 45, 55), size: int = 92):
+        """Vẽ 1 nhãn chữ nhấn: pop-in overshoot + nghiêng nhẹ kiểu chữ vẽ tay."""
+        s = max(0.01, MotionTimelineEngine.ease_out_back(min(1.0, dt / 0.35)))
+        font = self._get_label_font(size)
+        meas = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
+        tw = meas.textlength(text, font=font)
+        ascent, descent = font.getmetrics()
+        pad = 26
+        layer = Image.new("RGBA", (max(8, int(tw + pad * 2)), ascent + descent + pad * 2), (0, 0, 0, 0))
+        d = ImageDraw.Draw(layer)
+        d.text((pad, pad), text, font=font, fill=tuple(color) + (255,),
+               stroke_width=3, stroke_fill=(255, 255, 255, 255))
+        layer = layer.resize((max(1, int(layer.width * s)), max(1, int(layer.height * s))),
+                             Image.Resampling.LANCZOS)
+        layer = layer.rotate(-4, expand=True, resample=Image.Resampling.BICUBIC)
+        cx = float(pos_norm[0]) * width if float(pos_norm[0]) <= 1.5 else float(pos_norm[0])
+        cy = float(pos_norm[1]) * height if float(pos_norm[1]) <= 1.5 else float(pos_norm[1])
+        frame_img.alpha_composite(layer, (int(cx - layer.width / 2), int(cy - layer.height / 2)))
+
     def render_multi_element_scene(
         self,
         scene_layout: Dict[str, Any],
@@ -855,7 +914,9 @@ class GbroAdapter:
         height: int = 1920,
         fps: int = 12,
         timeline: Optional[List[Dict[str, Any]]] = None,
-        action_assets: Optional[List[Dict[str, Any]]] = None
+        action_assets: Optional[List[Dict[str, Any]]] = None,
+        labels: Optional[List[Dict[str, Any]]] = None,
+        pose_assets: Optional[Dict[str, Dict[str, str]]] = None
     ) -> str:
         """
         Lắp ráp hoạt cảnh Stop-Motion 12 FPS chuẩn Kiến trúc 7 Tầng Không Gian (Cinematic Collage Theatre):
@@ -869,6 +930,13 @@ class GbroAdapter:
         - Layer 4: Hero Actor (Axe), viền kem 9px #FFFDF7 và bóng đổ 3D. Vung cao -35° (y=0.16), bổ +6° (y=sec_y-0.02), recoil 8px.
         - Layer 5: Paper Debris FX (PaperFXEngine.get_particles_state), 3-5 mảnh dăm gỗ đa giác sắc nhọn viền kem 1.5px bung tỏa hình nón.
         - Layer 6: Director Accents (Victorian pointing hand / thước đo / thẻ bài).
+        - Layer 7 (Stage 6): Kinetic Labels — chữ nhấn theo nhịp beat (pop-in overshoot).
+
+        Args mở rộng (Stage 6, tương thích ngược — mặc định None = hành vi cũ):
+            labels: [{"text", "start", "end", "position": [x, y] (chuẩn hoá),
+                       "color": (r,g,b), "size": int}]
+            pose_assets: {target: {pose_name: asset_path}} — asset đổi tư thế cho
+                         action SWAP_ASSET; thiếu variant thì giữ ảnh gốc.
         """
         out_vid = Path(output_video_path).resolve()
         out_vid.parent.mkdir(parents=True, exist_ok=True)
@@ -1123,6 +1191,11 @@ class GbroAdapter:
                 aw = int(width * a_scale)
                 ah = int(a_raw.height * (aw / a_raw.width))
                 a_resized = a_raw.resize((aw, ah), Image.Resampling.LANCZOS)
+                act_variants = {}
+                for pose_name, pose_path in ((pose_assets or {}).get(act_id) or {}).items():
+                    styled_v = self._style_cutout_file(pose_path, width, a_scale)
+                    if styled_v is not None:
+                        act_variants[str(pose_name)] = styled_v
                 styled_action_assets[act_id] = {
                     "image": self.compositor.apply_paper_cutout_styling(
                         a_resized,
@@ -1133,8 +1206,34 @@ class GbroAdapter:
                         shadow_alpha=120,
                         outline_color=(255, 253, 247, 255)
                     ),
+                    "variants": act_variants,
+                    "position": act.get("position", [0.5, 0.5]),
                     "layer_order": act.get("layer_order", "below_hero")
                 }
+
+        # 3b. (Stage 6) Chuẩn bị ảnh styled cho pose variants của hero/secondary
+        #     (SWAP_ASSET đổi tư thế giữa chừng; thiếu variant thì giữ ảnh gốc)
+        styled_variants: Dict[str, Dict[str, Any]] = {}
+        for _target, _poses in (pose_assets or {}).items():
+            if _target in styled_action_assets:
+                continue  # đã xử lý ở trên
+            _base_scale = 0.48 if _target == "hero" else (0.38 if _target == "secondary" else 0.28)
+            for _pose_name, _pose_path in (_poses or {}).items():
+                _styled_v = self._style_cutout_file(_pose_path, width, _base_scale)
+                if _styled_v is not None:
+                    styled_variants.setdefault(_target, {})[str(_pose_name)] = _styled_v
+        # gộp variants của action assets vào map chung để frame loop tra cứu 1 chỗ
+        for _aid, _adict in styled_action_assets.items():
+            if _adict.get("variants"):
+                styled_variants[_aid] = _adict["variants"]
+
+        def _pick_variant(_target: str, _base_img, _st: Optional[Dict[str, Any]]):
+            _v = ((_st or {}).get("asset_variant") or "").strip()
+            if _v:
+                _alt = styled_variants.get(_target, {}).get(_v)
+                if _alt is not None:
+                    return _alt
+            return _base_img
 
         # =========================================================================
         # TẦNG 5: ĐỘNG CƠ MẢNH VỤN GIẤY DĂM GỖ (PAPER DEBRIS FX)
@@ -1276,7 +1375,7 @@ class GbroAdapter:
                 }
             for act_id in styled_action_assets:
                 base_configs[act_id] = {
-                    "position": [0.5, 0.5],
+                    "position": styled_action_assets[act_id].get("position", [0.5, 0.5]),
                     "scale_x": 1.0,
                     "scale_y": 1.0,
                     "rotation_deg": 0.0,
@@ -1384,7 +1483,7 @@ class GbroAdapter:
                         rot = st.get("rotation_deg", 0.0)
 
                         if sx > 0.02 and sy > 0.02 and opac > 0.02:
-                            curr_sec = sec_styled
+                            curr_sec = _pick_variant("secondary", sec_styled, st)
                             if abs(sx - 1.0) > 0.01 or abs(sy - 1.0) > 0.01:
                                 nw = max(5, int(sec_styled.width * sx))
                                 nh = max(5, int(sec_styled.height * sy))
@@ -1425,7 +1524,7 @@ class GbroAdapter:
                             rot = st.get("rotation_deg", 0.0)
                             opac = st.get("opacity", 1.0)
                             if sx > 0.02 and sy > 0.02 and opac > 0.02:
-                                act_img = act_dict["image"]
+                                act_img = _pick_variant(act_id, act_dict["image"], st)
                                 if abs(sx - 1.0) > 0.01 or abs(sy - 1.0) > 0.01:
                                     nw = max(5, int(act_img.width * sx))
                                     nh = max(5, int(act_img.height * sy))
@@ -1482,7 +1581,7 @@ class GbroAdapter:
                         rot = st.get("rotation_deg", 0.0)
 
                         if sx > 0.02 and sy > 0.02 and opac > 0.02:
-                            curr_hero = hero_styled
+                            curr_hero = _pick_variant("hero", hero_styled, st)
                             if abs(sx - 1.0) > 0.01 or abs(sy - 1.0) > 0.01:
                                 nw = max(5, int(hero_styled.width * sx))
                                 nh = max(5, int(hero_styled.height * sy))
@@ -1515,7 +1614,7 @@ class GbroAdapter:
                             rot = st.get("rotation_deg", 0.0)
                             opac = st.get("opacity", 1.0)
                             if sx > 0.02 and sy > 0.02 and opac > 0.02:
-                                act_img = act_dict["image"]
+                                act_img = _pick_variant(act_id, act_dict["image"], st)
                                 if abs(sx - 1.0) > 0.01 or abs(sy - 1.0) > 0.01:
                                     nw = max(5, int(act_img.width * sx))
                                     nh = max(5, int(act_img.height * sy))
@@ -1582,6 +1681,25 @@ class GbroAdapter:
                         hand_px = int(width * 0.58) + shake_x
                         hand_py = int(height * 0.10) + offset_y + shake_y
                         frame_img.paste(hand_img, (hand_px, hand_py), mask=hand_img)
+
+                # -----------------------------------------------------------------
+                # LAYER 7 (Stage 6): Kinetic Labels — chữ nhấn theo nhịp beat
+                # -----------------------------------------------------------------
+                if labels:
+                    for lb in labels:
+                        try:
+                            lstart = float(lb.get("start", 0))
+                            lend = float(lb.get("end", 0))
+                        except (TypeError, ValueError):
+                            continue
+                        if lstart <= t < lend and str(lb.get("text", "")).strip():
+                            self._draw_kinetic_label(
+                                frame_img, str(lb["text"]),
+                                lb.get("position", [0.5, 0.16]),
+                                t - lstart, width, height,
+                                color=tuple(lb.get("color", (200, 45, 55))),
+                                size=int(lb.get("size", 92)),
+                            )
 
                 frame_file = work_dir / f"frame_{frame_idx:04d}.png"
                 frame_img.convert("RGB").save(str(frame_file))
@@ -1697,6 +1815,142 @@ class GbroAdapter:
                 pass
 
         return str(out_vid)
+
+    # -------------------------------------------------------------------------
+    # Stage 6 — render 1 scene theo story beats (đường production mới)
+    # -------------------------------------------------------------------------
+    def render_beats_clip(
+        self,
+        scene: Dict[str, Any],
+        choreo: Dict[str, Any],
+        assets: Dict[str, str],
+        output_path: str,
+        work_dir=None,
+        width: int = 1080,
+        height: int = 1920,
+        duration: float = 5.0,
+        fps: int = 12,
+        pose_assets: Optional[Dict[str, Dict[str, str]]] = None,
+    ) -> str:
+        """
+        Dựng 1 scene từ output của BeatChoreographer.
+
+        Args:
+            scene: scene dict (lấy color_field/color_hex).
+            choreo: output của BeatChoreographer.choreograph
+                    (timeline/cast/beat_timing/labels).
+            assets: {target: asset_path} — "hero", "secondary", "action_*".
+            pose_assets: {target: {pose_name: asset_path}} cho SWAP_ASSET.
+        """
+        cast = choreo.get("cast", {}) or {}
+        hero_pos = cast.get("hero", {}).get("position", [0.5, 0.16])
+        sec_pos = cast.get("secondary", {}).get("position", [0.5, 0.68])
+        action_assets: List[Dict[str, Any]] = []
+        for tid, info in cast.items():
+            if tid in ("hero", "secondary"):
+                continue
+            p = (assets or {}).get(tid)
+            if p and os.path.exists(p):
+                action_assets.append({
+                    "id": tid,
+                    "path": p,
+                    "scale": 0.30,
+                    "position": info.get("position", [0.5, 0.5]),
+                    "layer_order": "above_hero",
+                })
+        scene_layout = {
+            "color_field": scene.get("color_field"),
+            "color_hex": scene.get("color_hex"),
+            "hero_element": {"position": hero_pos, "scale": 0.48, "visible": True},
+            "secondary_element": {"position": sec_pos, "scale": 0.38, "visible": True},
+            "action_assets": action_assets,
+            "stage_prop": "floating",
+            "timeline": choreo.get("timeline", []),
+        }
+        return self.render_multi_element_scene(
+            scene_layout=scene_layout,
+            hero_asset_path=(assets or {}).get("hero", ""),
+            secondary_asset_path=(assets or {}).get("secondary", ""),
+            output_video_path=output_path,
+            duration=duration,
+            work_dir=work_dir,
+            width=width,
+            height=height,
+            fps=fps,
+            timeline=choreo.get("timeline", []),
+            action_assets=action_assets,
+            labels=choreo.get("labels", []),
+            pose_assets=pose_assets,
+        )
+
+    # -------------------------------------------------------------------------
+    # Stage 6 — chuyển cảnh giấy xé (paper wipe) giữa 2 scene
+    # -------------------------------------------------------------------------
+    def render_paper_wipe(
+        self,
+        prev_clip: str,
+        next_clip: str,
+        output_path: str,
+        width: int = 1080,
+        height: int = 1920,
+        fps: int = 12,
+        duration: float = 0.5,
+    ) -> str:
+        """
+        Tạo clip chuyển cảnh: dải giấy kem mép xé quét ngang, mở ra scene mới.
+        Trả về đường dẫn clip wipe (có audio câm để concat đồng bộ).
+        """
+        out = Path(output_path)
+        out.parent.mkdir(parents=True, exist_ok=True)
+        fa = out.parent / "wipe_a.png"
+        fb = out.parent / "wipe_b.png"
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-sseof", "-0.1", "-i", prev_clip,
+                        "-vframes", "1", str(fa)], check=True)
+        subprocess.run(["ffmpeg", "-y", "-v", "error", "-i", next_clip,
+                        "-vframes", "1", str(fb)], check=True)
+        img_a = Image.open(fa).convert("RGBA").resize((width, height), Image.Resampling.LANCZOS)
+        img_b = Image.open(fb).convert("RGBA").resize((width, height), Image.Resampling.LANCZOS)
+
+        frames_dir = out.parent / f"wipe_frames_{out.stem}"
+        frames_dir.mkdir(parents=True, exist_ok=True)
+        n = max(2, int(round(duration * fps)))
+        rng = random.Random(11)
+        for i in range(n):
+            p = i / max(1, n - 1)
+            sweep = int(p * width * 1.3)
+            frame = img_a.copy()
+            # Vùng scene mới đã lộ ra (mép xé lởm chởm)
+            edge = []
+            y = -40
+            while y <= height + 40:
+                edge.append((sweep + rng.randint(-22, 22), y))
+                y += 110
+            mask = Image.new("L", (width, height), 0)
+            ImageDraw.Draw(mask).polygon([(0, 0)] + edge + [(0, height)], fill=255)
+            frame.paste(img_b, (0, 0), mask)
+            # Dải giấy kem dọc theo mép quét + bóng đổ
+            band_w = 110
+            band_edge = [(x + band_w, yy) for x, yy in edge]
+            shadow = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            ImageDraw.Draw(shadow).polygon(edge + list(reversed(band_edge)), fill=(90, 80, 70, 90))
+            shadow = shadow.filter(ImageFilter.GaussianBlur(10))
+            frame = Image.alpha_composite(frame, shadow)
+            paper = Image.new("RGBA", (width, height), (0, 0, 0, 0))
+            ImageDraw.Draw(paper).polygon(edge + list(reversed(band_edge)), fill=(255, 253, 247, 255))
+            frame = Image.alpha_composite(frame, paper)
+            frame.convert("RGB").save(str(frames_dir / f"f_{i:04d}.png"))
+
+        cmd = ["ffmpeg", "-y", "-v", "error",
+               "-framerate", str(fps), "-i", str(frames_dir / "f_%04d.png"),
+               "-f", "lavfi", "-i", "anullsrc=r=44100:cl=stereo",
+               "-t", f"{duration:.2f}",
+               "-c:v", "libx264", "-pix_fmt", "yuv420p",
+               "-c:a", "aac", "-shortest", str(out)]
+        subprocess.run(cmd, check=True)
+        for tmp in (fa, fb):
+            try: tmp.unlink()
+            except OSError: pass
+        return str(out)
 
     # -------------------------------------------------------------------------
     # Alias cho chuẩn 7 Tầng Không Gian Cinematic Collage Theatre (Milestone M3)

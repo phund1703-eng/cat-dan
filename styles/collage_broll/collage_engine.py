@@ -19,6 +19,7 @@ from core.render_engine.ffmpeg_utils import get_video_info, concat_videos, add_b
 from core.render_engine.subtitle_generator import SubtitleGenerator
 from core.media_engine.image_generator import ImageGenerator
 from core.media_engine.dynamic_cutout_manager import DynamicCutoutManager
+from core.media_engine.beat_choreographer import BeatChoreographer
 from .gbro_adapter import GbroAdapter
 
 
@@ -167,27 +168,63 @@ class CollageEngine:
                     fallback_scene_index=i + 5
                 )
 
-            # Render video clip stop-motion chuẩn gbro (Omni Flash hoặc Local Multi-Layer Assembler)
+            # Render video clip: đường beats (Stage 6) nếu scene có beats,
+            # fallback về render_gbro_clip cũ khi beats render lỗi.
             scene_clip_path = str(scene_dir / f"clip_{i:02d}.mp4")
             raw_scene_clip = str(scene_dir / f"clip_raw_{i:02d}.mp4")
-            
-            self.gbro_adapter.render_gbro_clip(
-                still_image_path=scene_media,
-                color_field=color_field,
-                color_hex=color_hex,
-                assembly_order=assembly_order,
-                output_path=raw_scene_clip,
-                focal_sticker_path=focal_sticker_path,
-                secondary_sticker_path=secondary_sticker_path,
-                layout_type=layout_type,
-                topic_domain=topic_domain,
-                has_hand=has_hand,
-                has_camera=has_camera,
-                duration=scene_duration,
-                work_dir=scene_dir / "gbro",
-                width=width,
-                height=height
-            )
+
+            beats = scene.get("beats") or []
+            if beats:
+                try:
+                    logger.info(f"🎭 [Beats] Dựng scene {i+1} theo {len(beats)} story beats...")
+                    await self._render_beats_scene(
+                        scene=scene,
+                        scene_duration=scene_duration,
+                        width=width, height=height,
+                        scene_dir=scene_dir,
+                        scene_index=i,
+                        topic_domain=topic_domain,
+                        focal_sticker_path=focal_sticker_path,
+                        secondary_sticker_path=secondary_sticker_path,
+                        output_path=raw_scene_clip,
+                    )
+                except Exception as e_beats:
+                    logger.warning(f"Beats render lỗi ({e_beats}), fallback về render_gbro_clip.")
+                    self.gbro_adapter.render_gbro_clip(
+                        still_image_path=scene_media,
+                        color_field=color_field,
+                        color_hex=color_hex,
+                        assembly_order=assembly_order,
+                        output_path=raw_scene_clip,
+                        focal_sticker_path=focal_sticker_path,
+                        secondary_sticker_path=secondary_sticker_path,
+                        layout_type=layout_type,
+                        topic_domain=topic_domain,
+                        has_hand=has_hand,
+                        has_camera=has_camera,
+                        duration=scene_duration,
+                        work_dir=scene_dir / "gbro",
+                        width=width,
+                        height=height
+                    )
+            else:
+                self.gbro_adapter.render_gbro_clip(
+                    still_image_path=scene_media,
+                    color_field=color_field,
+                    color_hex=color_hex,
+                    assembly_order=assembly_order,
+                    output_path=raw_scene_clip,
+                    focal_sticker_path=focal_sticker_path,
+                    secondary_sticker_path=secondary_sticker_path,
+                    layout_type=layout_type,
+                    topic_domain=topic_domain,
+                    has_hand=has_hand,
+                    has_camera=has_camera,
+                    duration=scene_duration,
+                    work_dir=scene_dir / "gbro",
+                    width=width,
+                    height=height
+                )
 
             # Ghép nối audio vào clip nếu có audio
             if scene_audio and os.path.exists(scene_audio):
@@ -210,10 +247,13 @@ class CollageEngine:
 
             scene_video_clips.append(scene_clip_path)
 
-        # Ghép nối các cảnh
+        # Ghép nối các cảnh (chèn chuyển cảnh giấy xé giữa các scene)
         raw_concat_path = str(work_dir / "concat_raw.mp4")
         logger.info(f"🔗 Đang ghép nối {len(scene_video_clips)} cảnh thành video chính...")
-        concat_videos(scene_video_clips, raw_concat_path)
+        concat_videos(
+            self._insert_paper_wipes(scene_video_clips, work_dir, width, height),
+            raw_concat_path,
+        )
 
         # Xuất file phụ đề TikTok ASS chuẩn 100% tiếng Việt từ script
         final_video_path = str(out_path)
@@ -250,6 +290,117 @@ class CollageEngine:
 
         logger.success(f"🎉 Xuất xưởng video Collage B-Roll thành công: {final_video_path}")
         return final_video_path
+
+    async def _render_beats_scene(
+        self,
+        scene: Dict[str, Any],
+        scene_duration: float,
+        width: int,
+        height: int,
+        scene_dir: Path,
+        scene_index: int,
+        topic_domain: str,
+        focal_sticker_path: str,
+        secondary_sticker_path: str,
+        output_path: str,
+    ) -> str:
+        """
+        Dựng 1 scene theo story beats (Stage 6):
+        choreograph beats -> timeline -> render_multi_element_scene nhiều beat.
+        """
+        choreo = BeatChoreographer(width=width, height=height).choreograph(scene, scene_duration)
+
+        # Map target -> asset path. Hero/secondary dùng sticker đã lấy ở create_video.
+        assets: Dict[str, str] = {}
+        if focal_sticker_path and os.path.exists(focal_sticker_path):
+            assets["hero"] = focal_sticker_path
+        if secondary_sticker_path and os.path.exists(secondary_sticker_path):
+            assets["secondary"] = secondary_sticker_path
+        prop_n = 0
+        for tid, info in (choreo.get("cast") or {}).items():
+            if tid in assets:
+                continue
+            keyword = str(info.get("keyword") or "").strip()
+            if not keyword:
+                continue
+            prop_path = await self.cutout_mgr.get_cutout_sticker(
+                keyword=keyword,
+                domain=topic_domain,
+                is_character=False,
+                fallback_scene_index=scene_index + 10 + prop_n,
+            )
+            prop_n += 1
+            if prop_path and os.path.exists(prop_path):
+                assets[tid] = prop_path
+
+        # Pose variants cho SWAP_ASSET: thử lấy sticker tư thế khác theo keyword.
+        pose_assets: Dict[str, Dict[str, str]] = {}
+        for act in choreo.get("timeline", []):
+            if str(act.get("action", "")).upper() != "SWAP_ASSET":
+                continue
+            target = act.get("target")
+            pose = str(act.get("pose") or "alt")
+            base_path = assets.get(target)
+            keyword = str((choreo.get("cast") or {}).get(target, {}).get("keyword") or "")
+            if not base_path or not keyword or pose in (pose_assets.get(target) or {}):
+                continue
+            try:
+                variant_path = await self.cutout_mgr.get_cutout_sticker(
+                    keyword=f"{keyword} {pose}",
+                    domain=topic_domain,
+                    is_character=False,
+                    fallback_scene_index=scene_index + 30,
+                )
+            except Exception:
+                variant_path = ""
+            if (variant_path and os.path.exists(variant_path)
+                    and os.path.abspath(variant_path) != os.path.abspath(base_path)):
+                pose_assets.setdefault(target, {})[pose] = variant_path
+                logger.info(f"🎭 [Beats] pose variant '{pose}' cho '{target}': {Path(variant_path).name}")
+
+        # Lọc timeline theo target có asset thật (tránh element ma ở giữa khung).
+        valid = set(assets.keys())
+        choreo["timeline"] = [a for a in choreo.get("timeline", []) if a.get("target") in valid]
+
+        return self.gbro_adapter.render_beats_clip(
+            scene=scene,
+            choreo=choreo,
+            assets=assets,
+            output_path=output_path,
+            work_dir=scene_dir / "beats",
+            width=width,
+            height=height,
+            duration=scene_duration,
+            fps=12,
+            pose_assets=pose_assets or None,
+        )
+
+    def _insert_paper_wipes(
+        self,
+        scene_clips: List[str],
+        work_dir: Path,
+        width: int,
+        height: int,
+    ) -> List[str]:
+        """
+        Chèn clip chuyển cảnh giấy xé giữa các scene. Lỗi ở wipe nào thì bỏ qua
+        wipe đó (giữ cắt cứng) chứ không fail cả video.
+        """
+        if len(scene_clips) < 2:
+            return scene_clips
+        out: List[str] = [scene_clips[0]]
+        for i in range(1, len(scene_clips)):
+            wipe_path = str(work_dir / f"wipe_{i-1:02d}_{i:02d}.mp4")
+            try:
+                self.gbro_adapter.render_paper_wipe(
+                    scene_clips[i - 1], scene_clips[i], wipe_path,
+                    width=width, height=height,
+                )
+                out.append(wipe_path)
+            except Exception as e:
+                logger.warning(f"Bỏ qua paper wipe {i-1}->{i} ({e}), giữ cắt cứng.")
+            out.append(scene_clips[i])
+        return out
 
     async def _render_scene_clip(
         self,
