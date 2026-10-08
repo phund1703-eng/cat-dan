@@ -11,9 +11,10 @@ Stage 6 — story beats (kể chuyện theo nhịp lời thoại):
             "narration_part": "trích nguyên văn một cụm lời thoại của beat",
             "elements": [
                 {"role": "focal|secondary|prop|label", "keyword": "white blood cell",
-                 "action": "enter|exit|emphasize|swap_pose",
+                 "action": "enter|exit|emphasize|swap_pose|approach|absorb",
                  "from": "left|right|top|bottom", "to": "left|right|top|bottom",
-                 "pose": "ten tu the (chi dung voi swap_pose)"}
+                 "pose": "ten tu the (chi dung voi swap_pose)",
+                 "target": "keyword nhan vat bi tiep can (chi dung voi approach)"}
             ],
             "emphasis_words": ["tu nhan manh hien theo nhip noi"]
         }
@@ -76,7 +77,7 @@ def normalize_script_scenes(script: Any) -> Any:
 # Stage 6 — story beats
 # ---------------------------------------------------------------------------
 
-BEAT_ACTIONS = ("enter", "exit", "emphasize", "swap_pose")
+BEAT_ACTIONS = ("enter", "exit", "emphasize", "swap_pose", "approach", "absorb")
 BEAT_ROLES = ("focal", "secondary", "prop", "label")
 BEAT_DIRECTIONS = ("left", "right", "top", "bottom")
 MAX_BEATS = 6
@@ -93,7 +94,7 @@ def normalize_beat_element(el: Any) -> Dict[str, str]:
     """Coerces one raw beat element into the canonical element dict shape."""
     if not isinstance(el, dict):
         return {"role": "prop", "keyword": "", "action": "enter",
-                "from": "left", "to": "right", "pose": ""}
+                "from": "left", "to": "right", "pose": "", "target": ""}
     role = str(el.get("role") or "prop").strip().lower()
     action = str(el.get("action") or "enter").strip().lower()
     from_dir = str(el.get("from") or "left").strip().lower()
@@ -105,6 +106,7 @@ def normalize_beat_element(el: Any) -> Dict[str, str]:
         "from": from_dir if from_dir in BEAT_DIRECTIONS else "left",
         "to": to_dir if to_dir in BEAT_DIRECTIONS else "right",
         "pose": str(el.get("pose") or "").strip(),
+        "target": str(el.get("target") or "").strip(),
     }
 
 

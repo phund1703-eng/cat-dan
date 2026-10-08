@@ -175,3 +175,70 @@ def test_deterministic():
     a = _choreo()
     b = _choreo()
     assert a == b
+
+
+def _hunt_scene():
+    return {
+        "narration": "Vi khuẩn lẻn vào. Bạch cầu xuất hiện. Nó lao tới tóm gọn.",
+        "focal_keyword": "white blood cell",
+        "secondary_keyword": "bacterium",
+        "beats": [
+            {"narration_part": "Vi khuẩn lẻn vào.",
+             "elements": [{"role": "secondary", "keyword": "bacterium",
+                           "action": "enter", "from": "right"}],
+             "emphasis_words": []},
+            {"narration_part": "Bạch cầu xuất hiện.",
+             "elements": [{"role": "focal", "keyword": "white blood cell",
+                           "action": "enter", "from": "left"}],
+             "emphasis_words": ["xuất hiện"]},
+            {"narration_part": "Nó lao tới tóm gọn.",
+             "elements": [{"role": "focal", "keyword": "white blood cell",
+                           "action": "approach", "target": "bacterium"},
+                          {"role": "focal", "keyword": "white blood cell",
+                           "action": "swap_pose", "pose": "grab"},
+                          {"role": "secondary", "keyword": "bacterium",
+                           "action": "absorb"}],
+             "emphasis_words": []},
+        ],
+    }
+
+
+def test_approach_moves_toward_target():
+    out = CHOREO.choreograph(_hunt_scene(), 9.0)
+    navs = [a for a in out["timeline"]
+            if a["action"] == "TRANSLATE_NAV" and a["target"] == "hero"]
+    assert len(navs) == 1
+    nav = navs[0]
+    sx, sy = nav["start_pos"]
+    ex, ey = nav["end_pos"]
+    # điểm đến gần vị trí nghỉ của bacterium (0.66*1080, 0.42*1920)
+    bx, by = 0.66 * 1080, 0.42 * 1920
+    import math
+    assert math.hypot(ex - bx, ey - by) < 320
+    assert math.hypot(ex - sx, ey - sy) > 100  # có di chuyển thật
+
+
+def test_approach_unknown_target_falls_back():
+    scene = _hunt_scene()
+    scene["beats"][2]["elements"][0] = {
+        "role": "focal", "keyword": "white blood cell",
+        "action": "approach", "target": "ghost xyz"}
+    out = CHOREO.choreograph(scene, 9.0)
+    navs = [a for a in out["timeline"]
+            if a["action"] == "TRANSLATE_NAV" and a["target"] == "hero"]
+    assert len(navs) == 1  # fallback: tiến về nhân vật khác (secondary)
+
+
+def test_absorb_emits_and_hides_via_engine():
+    out = CHOREO.choreograph(_hunt_scene(), 9.0)
+    ab = [a for a in out["timeline"] if a["action"] == "ABSORB_DISSOLVE"]
+    assert len(ab) == 1
+    assert ab[0]["target"] == "secondary"
+    engine = MotionTimelineEngine(
+        timeline=out["timeline"],
+        base_configs={k: {"position": v["position"], "visible": v["visible"]}
+                      for k, v in out["cast"].items()},
+    )
+    t0 = ab[0]["absorb_time"]
+    assert engine.get_frame_state(t0 - 0.05)["secondary"]["visible"] is True
+    assert engine.get_frame_state(t0 + 1.0)["secondary"]["visible"] is False

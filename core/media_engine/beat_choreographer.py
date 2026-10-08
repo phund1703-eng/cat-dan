@@ -17,6 +17,8 @@ Stage 6 Step 2 — BeatChoreographer: dựng timeline chuyển động từ stor
   exit     -> EXIT_SLIDE     (trượt ra theo hướng rồi visible=False)
   emphasize-> COMPRESS_SQUASH x2 (nảy to -> về 1.0, vì engine giữ scale cuối)
   swap_pose-> SWAP_ASSET     (đổi asset_variant; renderer vẽ variant tương ứng)
+  approach -> TRANSLATE_NAV  (tiến lại gần nhân vật khác, dừng cách ~260px)
+  absorb   -> ABSORB_DISSOLVE (bị nuốt: teo dần rồi biến mất)
 
 Nhịp beat neo theo số từ của narration_part trên tổng thời lượng audio thật,
 nên khớp nhịp nói dù TTS dài/ngắn.
@@ -78,27 +80,52 @@ class BeatChoreographer:
         labels: List[Dict[str, Any]] = []
         prop_idx = 0
 
-        for bi, (beat, (bstart, bend)) in enumerate(zip(beats, beat_timing)):
+        # Lượt 1a: đăng ký toàn bộ element thật (giữ thứ tự xuất hiện).
+        for beat in beats:
             for el in beat.get("elements") or []:
                 keyword = str(el.get("keyword") or "").strip()
                 role = el.get("role") or "prop"
+                if not keyword or keyword in target_by_keyword:
+                    continue
+                if role == "focal" and "hero" not in cast:
+                    target = "hero"
+                elif role == "secondary" and "secondary" not in cast:
+                    target = "secondary"
+                else:
+                    target = f"action_{_slug(keyword)}_{prop_idx}"
+                    prop_idx += 1
+                target_by_keyword[keyword] = target
+                cast[target] = self._make_cast_entry(target, role, keyword)
+
+        # Lượt 1b: đăng ký keyword chỉ xuất hiện trong "target" của approach
+        # (có vị trí để tính điểm đến; mặc định ẩn vì không có action enter).
+        for beat in beats:
+            for el in beat.get("elements") or []:
+                if str(el.get("action") or "") != "approach":
+                    continue
+                approached = str(el.get("target") or "").strip()
+                if approached and approached not in target_by_keyword:
+                    at = f"action_{_slug(approached)}_{prop_idx}"
+                    prop_idx += 1
+                    target_by_keyword[approached] = at
+                    entry = self._make_cast_entry(at, "secondary", approached)
+                    entry["visible"] = False
+                    cast[at] = entry
+
+        # Lượt 2: sinh actions theo từng beat.
+        for bi, (beat, (bstart, bend)) in enumerate(zip(beats, beat_timing)):
+            for el in beat.get("elements") or []:
+                keyword = str(el.get("keyword") or "").strip()
                 action = el.get("action") or "enter"
-                if not keyword and role != "label":
+                if not keyword:
                     continue
                 target = target_by_keyword.get(keyword)
                 if target is None:
-                    if role == "focal" and "hero" not in cast:
-                        target = "hero"
-                    elif role == "secondary" and "secondary" not in cast:
-                        target = "secondary"
-                    else:
-                        target = f"action_{_slug(keyword)}_{prop_idx}"
-                        prop_idx += 1
-                    target_by_keyword[keyword] = target
-                    cast[target] = self._make_cast_entry(target, role, keyword)
+                    continue
                 rest_px = self._to_px(cast[target]["position"])
                 timeline.extend(
-                    self._actions_for(target, action, el, rest_px, bstart, bend)
+                    self._actions_for(target, action, el, rest_px, bstart, bend,
+                                      cast, target_by_keyword)
                 )
             emphasis_text = " ".join(beat.get("emphasis_words") or []).strip()
             if emphasis_text:
@@ -173,6 +200,8 @@ class BeatChoreographer:
         rest_px: List[float],
         bstart: float,
         bend: float,
+        cast: Dict[str, Dict[str, Any]],
+        target_by_keyword: Dict[str, str],
     ) -> List[Dict[str, Any]]:
         if action == "enter":
             frm = str(el.get("from") or "left")
@@ -214,6 +243,43 @@ class BeatChoreographer:
                 "action": "SWAP_ASSET",
                 "swap_time": round(bstart + 0.1, 3),
                 "pose": str(el.get("pose") or "alt"),
+            }]
+        if action == "approach":
+            # Tiến lại gần nhân vật khác: trượt tới điểm cách mục tiêu ~260px.
+            approached_kw = str(el.get("target") or "").strip()
+            approached_id = target_by_keyword.get(approached_kw)
+            if approached_id is None or approached_id == target:
+                # Không xác định được mục tiêu: chọn nhân vật khác đầu tiên.
+                approached_id = next(
+                    (tid for tid in cast if tid != target), None)
+            if approached_id is None:
+                return []
+            dest_norm = cast[approached_id]["position"]
+            dest_px = self._to_px(dest_norm)
+            dx, dy = dest_px[0] - rest_px[0], dest_px[1] - rest_px[1]
+            dist = max(1.0, (dx * dx + dy * dy) ** 0.5)
+            gap = 260.0
+            stop = max(0.0, dist - gap) / dist
+            end_px = [rest_px[0] + dx * stop, rest_px[1] + dy * stop]
+            t0 = round(bstart + 0.05, 3)
+            return [{
+                "target": target,
+                "action": "TRANSLATE_NAV",
+                "time_range": [t0, round(t0 + 1.1, 3)],
+                "start_pos": [round(rest_px[0], 1), round(rest_px[1], 1)],
+                "end_pos": [round(end_px[0], 1), round(end_px[1], 1)],
+                "steps": 5,
+                "max_tilt_deg": 12.0,
+                "wave_amplitude": 20.0,
+            }]
+        if action == "absorb":
+            # Bị nuốt chửng: teo dần rồi biến mất (kẻ săn "ăn" con mồi).
+            return [{
+                "target": target,
+                "action": "ABSORB_DISSOLVE",
+                "absorb_time": round(bstart + 0.15, 3),
+                "duration": 0.7,
+                "steps": 4,
             }]
         return []
 
