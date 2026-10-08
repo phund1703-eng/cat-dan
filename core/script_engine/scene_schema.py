@@ -157,12 +157,14 @@ def _split_narration_parts(narration: str, max_beats: int = 4) -> List[str]:
     parts: List[str] = []
     buf = ""
     for ch in chunks:
-        words = (buf + " " + ch).strip().split()
-        if buf and len(words) > 16:
-            parts.append(buf.strip())
-            buf = ch
+        buf_words = len(buf.split())
+        combined = (buf + " " + ch).strip()
+        if buf and buf_words < 5 and len(combined.split()) <= 12:
+            buf = combined
         else:
-            buf = (buf + " " + ch).strip()
+            if buf.strip():
+                parts.append(buf.strip())
+            buf = ch
     if buf.strip():
         parts.append(buf.strip())
     # Merge down to max_beats by joining the shortest neighbours.
