@@ -12,13 +12,11 @@ Stage 6 Step 2 — BeatChoreographer: dựng timeline chuyển động từ stor
     "target_by_keyword": {keyword: target},
 }
 
-Ánh xạ beat -> action (chỉ dùng vocabulary engine HIỆN TẠI hỗ trợ):
+Ánh xạ beat -> action:
   enter    -> CONVERGE_WRAP  (bay vào từ ngoài biên, trước giờ spawn thì ẩn)
-  exit     -> TRANSLATE_NAV  (trượt ra khỏi khung; step 3 sẽ thay bằng EXIT_SLIDE
-                              có tắt visible)
+  exit     -> EXIT_SLIDE     (trượt ra theo hướng rồi visible=False)
   emphasize-> COMPRESS_SQUASH x2 (nảy to -> về 1.0, vì engine giữ scale cuối)
-  swap_pose-> SWAP_ASSET     (engine hiện tại chưa hỗ trợ -> no-op an toàn;
-                              step 3 triển khai)
+  swap_pose-> SWAP_ASSET     (đổi asset_variant; renderer vẽ variant tương ứng)
 
 Nhịp beat neo theo số từ của narration_part trên tổng thời lượng audio thật,
 nên khớp nhịp nói dù TTS dài/ngắn.
@@ -192,13 +190,11 @@ class BeatChoreographer:
             t0 = round(bstart + 0.1, 3)
             return [{
                 "target": target,
-                "action": "TRANSLATE_NAV",
+                "action": "EXIT_SLIDE",
                 "time_range": [t0, round(t0 + 0.8, 3)],
+                "direction": to if to in ("left", "right", "top", "bottom") else "right",
                 "start_pos": [round(rest_px[0], 1), round(rest_px[1], 1)],
-                "end_pos": [round(p, 1) for p in self._offscreen_px(to, rest_px)],
-                "steps": 5,
-                "max_tilt_deg": 10.0,
-                "wave_amplitude": 15.0,
+                "steps": 4,
             }]
         if action == "emphasize":
             t0 = round(bstart + 0.1, 3)
@@ -211,8 +207,8 @@ class BeatChoreographer:
                  "scale_x": 1.0, "scale_y": 1.0, "steps": 2},
             ]
         if action == "swap_pose":
-            # Step 3 triển khai SWAP_ASSET trong MotionTimelineEngine;
-            # hiện tại engine bỏ qua action lạ một cách an toàn.
+            # SWAP_ASSET: engine đặt asset_variant; renderer (Step 4) vẽ variant
+            # tương ứng, không có variant thì giữ ảnh gốc.
             return [{
                 "target": target,
                 "action": "SWAP_ASSET",

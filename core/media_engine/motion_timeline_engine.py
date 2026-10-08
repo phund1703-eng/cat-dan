@@ -1,6 +1,6 @@
 """
-AutoVideoFactory — MotionTimelineEngine (The 8 Universal Kinetic Engines)
-Bộ 8 động cơ chuyển động vật lý hoàn chỉnh ở nhịp stop-motion 12fps thô mộc:
+AutoVideoFactory — MotionTimelineEngine (The 11 Universal Kinetic Engines)
+Bộ 11 động cơ chuyển động vật lý hoàn chỉnh ở nhịp stop-motion 12fps thô mộc:
 1. ENGINE_COMPRESS_SQUASH : Nén ép & Nghiền dẹp (Hero dập xuống, Target dẹp Y, phình X theo nấc giật)
 2. ENGINE_SEVER_SHATTER   : Cắt xẻ & Tách đôi / Vỡ vụn (Hero chém xuống, Target tách 2 mảnh dạt sang hai bên)
 3. ENGINE_EMIT_SLIDE      : Đùn trượt liên tiếp từ trong ra ngoài (Hero giữ vị trí, Action assets trượt ra liên tiếp)
@@ -9,6 +9,9 @@ Bộ 8 động cơ chuyển động vật lý hoàn chỉnh ở nhịp stop-moti
 6. ENGINE_TRANSLATE_NAV   : Tịnh tiến & Hành trình (Di chuyển A -> B có góc nghiêng lượn sóng tilt_angle 12fps)
 7. ENGINE_SWEEP_OSCILLATE : Soi quét dao động (Hero xoay góc qua lại quanh trục +/- 15 đến +/- 25 độ)
 8. ENGINE_REVOLVE_VORTEX  : Quay quanh tâm & Lốc xoáy (Tọa độ tròn/elip [cx + R*cos, cy + R*sin] theo góc giật)
+9. ENGINE_SWAP_ASSET      : Đổi tư thế / Đổi asset giữa chừng (nhân vật đổi pose theo beat, Step 6 Stage 6)
+10. ENGINE_EXIT_SLIDE     : Trượt ra khỏi khung & Ẩn (element trượt theo hướng rồi visible=False)
+11. ENGINE_POP_IN         : Nảy vào (pop-in overshoot 0 -> 1 theo nấc stop-motion)
 """
 
 import math
@@ -18,10 +21,10 @@ from loguru import logger
 
 class MotionTimelineEngine:
     """
-    Bộ điều phối chuyển động vật lý 12fps cho 8 động cơ chuyển động phổ quát.
+    Bộ điều phối chuyển động vật lý 12fps cho 11 động cơ chuyển động phổ quát.
     """
 
-    # Danh mục tên 8 động cơ chuẩn
+    # Danh mục tên 11 động cơ chuẩn
     ENGINE_COMPRESS_SQUASH = "ENGINE_COMPRESS_SQUASH"
     ENGINE_SEVER_SHATTER = "ENGINE_SEVER_SHATTER"
     ENGINE_EMIT_SLIDE = "ENGINE_EMIT_SLIDE"
@@ -30,10 +33,24 @@ class MotionTimelineEngine:
     ENGINE_TRANSLATE_NAV = "ENGINE_TRANSLATE_NAV"
     ENGINE_SWEEP_OSCILLATE = "ENGINE_SWEEP_OSCILLATE"
     ENGINE_REVOLVE_VORTEX = "ENGINE_REVOLVE_VORTEX"
+    ENGINE_SWAP_ASSET = "ENGINE_SWAP_ASSET"
+    ENGINE_EXIT_SLIDE = "ENGINE_EXIT_SLIDE"
+    ENGINE_POP_IN = "ENGINE_POP_IN"
 
-    def __init__(self, timeline: Optional[List[Dict[str, Any]]] = None, base_configs: Optional[Dict[str, Dict[str, Any]]] = None):
+    # Hướng trượt cho EXIT_SLIDE (đơn vị: bội số kích thước khung hình)
+    EXIT_DIRECTIONS = {
+        "left": (-1.25, 0.0),
+        "right": (1.25, 0.0),
+        "top": (0.0, -1.25),
+        "bottom": (0.0, 1.25),
+    }
+
+    def __init__(self, timeline: Optional[List[Dict[str, Any]]] = None, base_configs: Optional[Dict[str, Dict[str, Any]]] = None,
+                 tactile_jitter_from: float = 3.8, tactile_jitter_amplitude: float = 1.2):
         self.timeline = timeline or []
         self.base_configs = base_configs or {}
+        self.tactile_jitter_from = tactile_jitter_from
+        self.tactile_jitter_amplitude = tactile_jitter_amplitude
 
     def set_timeline(self, timeline: List[Dict[str, Any]]):
         self.timeline = timeline
@@ -283,6 +300,67 @@ class MotionTimelineEngine:
 
     # Backward compatibility
     apply_discrete_translate = apply_translate_nav
+
+    # =========================================================================
+    # Helper: nảy overshoot (dùng cho POP_IN)
+    # =========================================================================
+    @staticmethod
+    def ease_out_back(x: float, overshoot: float = 1.70158) -> float:
+        """Nảy overshoot 0 -> 1 (dùng cho POP_IN)."""
+        x = min(max(x, 0.0), 1.0)
+        c = overshoot
+        return 1.0 + (c + 1.0) * (x - 1.0) ** 3 + c * (x - 1.0) ** 2
+
+    # =========================================================================
+    # ĐỘNG CƠ 10: EXIT SLIDE (Trượt ra khỏi khung rồi ẩn hẳn)
+    # =========================================================================
+    @classmethod
+    def apply_exit_slide(
+        cls,
+        t: float,
+        time_range: Tuple[float, float],
+        start_pos: Tuple[float, float],
+        end_pos: Tuple[float, float],
+        steps: int = 4
+    ) -> Tuple[float, float, bool]:
+        """
+        Returns: (pos_x, pos_y, visible)
+        Trước t0: giữ nguyên (visible=True). Trong [t0, t1]: trượt theo nấc.
+        Từ t1 trở đi: visible=False.
+        """
+        t0, t1 = time_range
+        if t < t0:
+            return float(start_pos[0]), float(start_pos[1]), True
+        if t >= t1:
+            return float(end_pos[0]), float(end_pos[1]), False
+        ratio = cls.calc_step_ratio(t, t0, t1, steps)
+        px = start_pos[0] + (end_pos[0] - start_pos[0]) * ratio
+        py = start_pos[1] + (end_pos[1] - start_pos[1]) * ratio
+        return float(px), float(py), True
+
+    # =========================================================================
+    # ĐỘNG CƠ 11: POP IN (Nảy vào với overshoot theo nấc stop-motion)
+    # =========================================================================
+    @classmethod
+    def apply_pop_in(
+        cls,
+        t: float,
+        start_time: float,
+        duration: float = 0.5,
+        steps: int = 3
+    ) -> Tuple[bool, float]:
+        """
+        Returns: (visible, scale)
+        Trước start_time: ẩn. Trong duration: scale nảy 0 -> overshoot -> 1.
+        Sau đó: scale = 1.
+        """
+        if t < start_time:
+            return False, 0.01
+        if t >= start_time + duration:
+            return True, 1.0
+        ratio = (t - start_time) / max(duration, 1e-6)
+        q = min(steps, int(ratio * steps) + 1) / max(steps, 1)
+        return True, max(0.01, cls.ease_out_back(q))
     apply_squash_and_stretch = apply_compress_squash
     apply_sequential_spawn = apply_emit_slide
 
@@ -313,10 +391,11 @@ class MotionTimelineEngine:
                 "scale_y": float(cfg.get("scale_y", 1.0)),
                 "rotation_deg": float(cfg.get("rotation_deg", 0.0)),
                 "visible": bool(cfg.get("visible", True)),
-                "opacity": float(cfg.get("opacity", 1.0))
+                "opacity": float(cfg.get("opacity", 1.0)),
+                "asset_variant": str(cfg.get("asset_variant") or "")
             }
 
-        # 2. Duyệt qua timeline để cập nhật theo 8 Động Cơ
+        # 2. Duyệt qua timeline để cập nhật theo 11 Động Cơ
         for act in self.timeline:
             target = act.get("target")
             action_type = act.get("action", "").upper()
@@ -330,7 +409,8 @@ class MotionTimelineEngine:
                     "scale_y": 1.0,
                     "rotation_deg": 0.0,
                     "visible": True,
-                    "opacity": 1.0
+                    "opacity": 1.0,
+                    "asset_variant": ""
                 }
 
             st = states[target]
@@ -521,6 +601,50 @@ class MotionTimelineEngine:
                 st["opacity"] = 1.0 if sin_val >= 0 else 0.85
 
             # -----------------------------------------------------------------
+            # 9. ENGINE_SWAP_ASSET (Đổi tư thế / asset giữa chừng theo beat)
+            # -----------------------------------------------------------------
+            elif action_type in [self.ENGINE_SWAP_ASSET, "SWAP_ASSET"]:
+                swap_time = float(act.get("swap_time", 1.0))
+                pose = str(act.get("pose") or "alt")
+                if t >= swap_time:
+                    st["asset_variant"] = pose
+
+            # -----------------------------------------------------------------
+            # 10. ENGINE_EXIT_SLIDE (Trượt ra khỏi khung rồi ẩn hẳn)
+            # -----------------------------------------------------------------
+            elif action_type in [self.ENGINE_EXIT_SLIDE, "EXIT_SLIDE"]:
+                time_range = act.get("time_range", [2.0, 2.8])
+                steps = int(act.get("steps", 4))
+                raw_end = act.get("end_pos")
+                if (isinstance(raw_end, (list, tuple)) and len(raw_end) == 2):
+                    end_pos = (float(raw_end[0]), float(raw_end[1]))
+                else:
+                    direction = str(act.get("direction") or "right").lower()
+                    dx, dy = self.EXIT_DIRECTIONS.get(direction, self.EXIT_DIRECTIONS["right"])
+                    end_pos = (st["position"][0] + dx * width,
+                               st["position"][1] + dy * height)
+                start_pos = act.get("start_pos", st["position"])
+                px, py, vis = self.apply_exit_slide(
+                    t, (float(time_range[0]), float(time_range[1])),
+                    (float(start_pos[0]), float(start_pos[1])), end_pos,
+                    steps=steps
+                )
+                st["position"] = [px, py]
+                st["visible"] = bool(vis)
+
+            # -----------------------------------------------------------------
+            # 11. ENGINE_POP_IN (Nảy vào với overshoot)
+            # -----------------------------------------------------------------
+            elif action_type in [self.ENGINE_POP_IN, "POP_IN"]:
+                start_t = float(act.get("start_time", 1.0))
+                dur = float(act.get("duration", 0.5))
+                steps = int(act.get("steps", 3))
+                vis, sc = self.apply_pop_in(t, start_t, duration=dur, steps=steps)
+                st["visible"] = bool(vis)
+                st["scale_x"] = float(sc)
+                st["scale_y"] = float(sc)
+
+            # -----------------------------------------------------------------
             # ROTATE_STEP (Legacy)
             # -----------------------------------------------------------------
             elif action_type == "ROTATE_STEP":
@@ -531,11 +655,14 @@ class MotionTimelineEngine:
                 ratio = self.calc_step_ratio(t, time_range[0], time_range[1], steps)
                 st["rotation_deg"] = start_rot + (end_rot - start_rot) * ratio
 
-        # 3. Áp dụng tactile jitter nếu ở giai đoạn giữ tĩnh cuối (t >= 3.8s)
-        if t >= 3.8:
+        # 3. Áp dụng tactile jitter nếu ở giai đoạn giữ tĩnh cuối (mặc định t >= 3.8s,
+        #    cấu hình được qua tactile_jitter_from / tactile_jitter_amplitude)
+        if t >= self.tactile_jitter_from:
             for target, st in states.items():
+                if not isinstance(st, dict):
+                    continue
                 if st["visible"] and st.get("opacity", 1.0) > 0.05:
-                    j_pos = self.apply_tactile_jitter(frame_idx, (st["position"][0], st["position"][1]), amplitude=1.2)
+                    j_pos = self.apply_tactile_jitter(frame_idx, (st["position"][0], st["position"][1]), amplitude=self.tactile_jitter_amplitude)
                     st["position"] = [j_pos[0], j_pos[1]]
 
         return states

@@ -80,12 +80,19 @@ def test_enter_uses_converge_wrap_inside_beat():
         assert abs(ox) >= 1080 * 0.8 or abs(oy) >= 1920 * 0.8
 
 
-def test_exit_goes_offscreen():
+def test_exit_goes_offscreen_and_hides():
     out = _choreo()
-    exits = [a for a in out["timeline"] if a["action"] == "TRANSLATE_NAV"]
+    exits = [a for a in out["timeline"] if a["action"] == "EXIT_SLIDE"]
     assert len(exits) == 1
-    ex, ey = exits[0]["end_pos"]
-    assert ex > 1080 or ey > 1920 or ex < 0 or ey < 0
+    assert exits[0]["direction"] == "right"
+    engine = MotionTimelineEngine(
+        timeline=out["timeline"],
+        base_configs={k: {"position": v["position"], "visible": v["visible"]}
+                      for k, v in out["cast"].items()},
+    )
+    t0, t1 = exits[0]["time_range"]
+    assert engine.get_frame_state(t0 - 0.05)["secondary"]["visible"] is True
+    assert engine.get_frame_state(t1 + 0.1)["secondary"]["visible"] is False
 
 
 def test_emphasize_restores_scale_via_engine():
