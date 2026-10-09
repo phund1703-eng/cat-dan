@@ -888,6 +888,12 @@ class GbroAdapter:
         font = self._get_label_font(size)
         meas = ImageDraw.Draw(Image.new("RGBA", (8, 8)))
         tw = meas.textlength(text, font=font)
+        # Tự co chữ để nhãn dài không tràn khỏi khung.
+        max_w = width * 0.86
+        if tw > max_w > 0:
+            size = max(30, int(size * max_w / tw))
+            font = self._get_label_font(size)
+            tw = meas.textlength(text, font=font)
         ascent, descent = font.getmetrics()
         pad = 26
         layer = Image.new("RGBA", (max(8, int(tw + pad * 2)), ascent + descent + pad * 2), (0, 0, 0, 0))
