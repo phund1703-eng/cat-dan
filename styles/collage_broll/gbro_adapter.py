@@ -1874,6 +1874,11 @@ class GbroAdapter:
             "action_assets": action_assets,
             "stage_prop": "floating",
             "timeline": choreo.get("timeline", []),
+            # Mảnh vỡ chỉ khi thật sự có cú vỡ (SEVER_SHATTER): tránh "rác"
+            # tĩnh từ thời rìu/chẻ gỗ rơi vào mọi scene beats.
+            "paper_debris_fx": {"enabled": any(
+                str(a.get("action") or "") == "SEVER_SHATTER"
+                for a in (choreo.get("timeline", []) or []))},
         }
         if backdrop_path and os.path.exists(backdrop_path):
             scene_layout["archival_backdrop"] = {"asset_path": backdrop_path}
