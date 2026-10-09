@@ -122,3 +122,29 @@ def test_pulse_alias_engine_constant():
            "time_range": [0.5, 2.5]}]
     e = _engine(tl)
     assert e.get_frame_state(1.0)["hero"]["scale_x"] >= 1.0
+
+
+def test_translate_nav_negative_pixel_start_is_offscreen():
+    # Hồi quy: start_pos pixel âm (ngoài khung, vd action "flow") không được
+    # hiểu nhầm thành toạ độ chuẩn hoá 0..1.
+    tl = [{"target": "hero", "action": "TRANSLATE_NAV",
+           "time_range": [1.0, 3.0],
+           "start_pos": [-500.0, 900.0], "end_pos": [1500.0, 900.0],
+           "steps": 4}]
+    e = _engine(tl)
+    x0 = e.get_frame_state(1.0)["hero"]["position"][0]
+    x1 = e.get_frame_state(3.0)["hero"]["position"][0]
+    assert x0 == pytest.approx(-500.0, abs=60.0)
+    assert x1 == pytest.approx(1500.0, abs=60.0)
+    xm = e.get_frame_state(2.0)["hero"]["position"][0]
+    assert -500.0 < xm < 1500.0
+
+
+def test_translate_nav_normalized_still_works():
+    tl = [{"target": "hero", "action": "TRANSLATE_NAV",
+           "time_range": [1.0, 2.0],
+           "start_pos": [0.2, 0.5], "end_pos": [0.8, 0.5],
+           "steps": 4}]
+    e = _engine(tl)
+    x0 = e.get_frame_state(1.0)["hero"]["position"][0]
+    assert x0 == pytest.approx(0.2 * 1080, abs=60.0)

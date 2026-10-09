@@ -571,10 +571,12 @@ class MotionTimelineEngine:
                 tilt = act.get("max_tilt_deg", 22.0)
                 wave_amp = act.get("wave_amplitude", 45.0)
 
-                s_px = (s_pos[0] if s_pos[0] > 1.0 else s_pos[0] * width,
-                        s_pos[1] if s_pos[1] > 1.0 else s_pos[1] * height)
-                e_px = (e_pos[0] if e_pos[0] > 1.0 else e_pos[0] * width,
-                        e_pos[1] if e_pos[1] > 1.0 else e_pos[1] * height)
+                # Quy ước toạ độ: 0..1 = chuẩn hoá theo khung hình, còn lại = pixel
+                # (pixel có thể âm khi bắt đầu ngoài khung, vd action "flow").
+                s_px = (s_pos[0] * width if 0.0 <= s_pos[0] <= 1.0 else s_pos[0],
+                        s_pos[1] * height if 0.0 <= s_pos[1] <= 1.0 else s_pos[1])
+                e_px = (e_pos[0] * width if 0.0 <= e_pos[0] <= 1.0 else e_pos[0],
+                        e_pos[1] * height if 0.0 <= e_pos[1] <= 1.0 else e_pos[1])
 
                 curr_x, curr_y, curr_tilt = self.apply_translate_nav(
                     t, s_px, e_px, time_range, max_tilt_deg=tilt, wave_amplitude=wave_amp, steps=steps
