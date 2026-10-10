@@ -7,7 +7,7 @@ Empirical Challenger & Stress Test Suite for:
 
 Verifies:
 1. Default model is gemini-3.8-flash.
-2. Candidate model fallback list is ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-flash-latest"].
+2. Candidate model fallback list is ["gemini-3.8-flash", "gemini-flash-latest"].
 3. Candidate fallback loop behavior under simulated failure (404, 503, invalid JSON, 429 quota).
 4. Non-blocking asyncio.to_thread execution without blocking or crashing the event loop.
 """
@@ -50,31 +50,31 @@ def test_env_config():
 def test_model_defaults_and_candidate_list():
     """Verify default model and candidate fallback list."""
     print("\n--- Test 2: GeminiClient Defaults & Candidate List ---")
-    assert DEFAULT_FALLBACK_MODELS == ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-flash-latest"], (
+    assert DEFAULT_FALLBACK_MODELS == ["gemini-3.8-flash", "gemini-flash-latest"], (
         f"DEFAULT_FALLBACK_MODELS mismatch: {DEFAULT_FALLBACK_MODELS}"
     )
     
     client = GeminiClient()
     assert client.default_model == "gemini-3.8-flash", f"Expected default_model 'gemini-3.8-flash', got '{client.default_model}'"
-    assert client.fallback_models == ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-flash-latest"], (
+    assert client.fallback_models == ["gemini-3.8-flash", "gemini-flash-latest"], (
         f"client.fallback_models mismatch: {client.fallback_models}"
     )
     
     # Check default candidate models
     candidates = client._get_candidate_models()
-    assert candidates == ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-flash-latest"], (
+    assert candidates == ["gemini-3.8-flash", "gemini-flash-latest"], (
         f"Candidates mismatch: {candidates}"
     )
     
     # Check custom preferred model ordering and deduplication
     custom_candidates = client._get_candidate_models("custom-model-x")
-    assert custom_candidates == ["custom-model-x", "gemini-3.8-flash", "gemini-3.7-flash", "gemini-flash-latest"], (
+    assert custom_candidates == ["custom-model-x", "gemini-3.8-flash", "gemini-flash-latest"], (
         f"Custom candidates mismatch: {custom_candidates}"
     )
     
     # Check preferred model that is already in fallback list (should be prioritized first, deduplicated)
-    fallback_as_pref = client._get_candidate_models("gemini-3.7-flash")
-    assert fallback_as_pref == ["gemini-3.7-flash", "gemini-3.8-flash", "gemini-flash-latest"], (
+    fallback_as_pref = client._get_candidate_models("gemini-flash-latest")
+    assert fallback_as_pref == ["gemini-flash-latest", "gemini-3.8-flash"], (
         f"Priority candidates mismatch: {fallback_as_pref}"
     )
     print("  [PASS] Model defaults and candidate lists verified with correct ordering and deduplication")
@@ -94,9 +94,9 @@ def test_simulated_fallback_generate():
             def fail_call(*args, **kwargs):
                 raise RuntimeError("404 Model Not Found: gemini-3.8-flash")
             mock_model.generate_content.side_effect = fail_call
-        elif model_name == "gemini-3.7-flash":
+        elif model_name == "gemini-flash-latest":
             mock_resp = MagicMock()
-            mock_resp.text = "Success output from gemini-3.7-flash"
+            mock_resp.text = "Success output from gemini-flash-latest"
             mock_model.generate_content.return_value = mock_resp
         else:
             mock_resp = MagicMock()
@@ -107,10 +107,9 @@ def test_simulated_fallback_generate():
     with patch("core.script_engine.gemini_client.genai.GenerativeModel", side_effect=fake_generative_model):
         result = asyncio.run(client.generate("Test prompt"))
         
-    assert result == "Success output from gemini-3.7-flash", f"Unexpected result: {result}"
+    assert result == "Success output from gemini-flash-latest", f"Unexpected result: {result}"
     assert "gemini-3.8-flash" in calls, "Primary model should have been attempted"
-    assert "gemini-3.7-flash" in calls, "Secondary model should have been attempted on fallback"
-    assert "gemini-flash-latest" not in calls, "Tertiary model should not be called if secondary succeeds"
+    assert "gemini-flash-latest" in calls, "Secondary model should have been attempted on fallback"
     print(f"  [PASS] Fallback succeeded: Attempted {calls}, returned secondary model response")
 
 
@@ -128,11 +127,6 @@ def test_simulated_multi_level_fallback_generate_script():
             def fail_call(*args, **kwargs):
                 raise RuntimeError("503 Service Unavailable")
             mock_model.generate_content.side_effect = fail_call
-        elif model_name == "gemini-3.7-flash":
-            # Returns unparseable non-JSON text
-            mock_resp = MagicMock()
-            mock_resp.text = "Sorry, I cannot produce JSON right now."
-            mock_model.generate_content.return_value = mock_resp
         elif model_name == "gemini-flash-latest":
             # Returns valid JSON
             mock_resp = MagicMock()
@@ -149,10 +143,10 @@ def test_simulated_multi_level_fallback_generate_script():
         
     assert isinstance(result, dict), f"Expected dict, got {type(result)}"
     assert result["title"] == "Success Title", f"Unexpected title: {result.get('title')}"
-    assert calls == ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-flash-latest"], (
-        f"Expected all 3 models in sequence, got: {calls}"
+    assert calls == ["gemini-3.8-flash", "gemini-flash-latest"], (
+        f"Expected all 2 models in sequence, got: {calls}"
     )
-    print(f"  [PASS] Multi-level fallback succeeded through 3 models: {calls}")
+    print(f"  [PASS] Multi-level fallback succeeded through 2 models: {calls}")
 
 
 def test_all_models_fail_raises_last_error():
@@ -177,7 +171,7 @@ def test_all_models_fail_raises_last_error():
         except RuntimeError as e:
             assert "gemini-flash-latest" in str(e), f"Expected last error from gemini-flash-latest, got: {e}"
             
-    assert calls == ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-flash-latest"], (
+    assert calls == ["gemini-3.8-flash", "gemini-flash-latest"], (
         f"All models should have been attempted, got: {calls}"
     )
     print("  [PASS] All candidate models attempted and last error cleanly raised")

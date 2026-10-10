@@ -10,7 +10,10 @@ from core.config import get_gemini_model
 
 load_dotenv()
 
-DEFAULT_FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-3.7-flash", "gemini-flash-latest"]
+# gemini-3.7-flash da bi Google khai tu (404 tren Generative Language API, doi thanh
+# id -tiered); theo huong dan migration cua Google, fallback chi giu gemini-3.8-flash
+# va alias gemini-flash-latest.
+DEFAULT_FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-flash-latest"]
 
 class GeminiClient:
     """Client for interacting with Google's Gemini API with Dual-Key Failover and Dynamic Model Fallback support."""
