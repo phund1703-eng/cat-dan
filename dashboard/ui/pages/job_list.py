@@ -131,12 +131,18 @@ else:
         created_str = str(j.get("created_at", ""))[:19].replace("T", " ")
         publish_info = (j.get("pipeline_data") or {}).get("publish") or {}
         scheduled_str = str(publish_info.get("scheduled_at", ""))[:19].replace("T", " ")
+        p_data = j.get("pipeline_data") or {}
+        prog = p_data.get("progress") or {}
+        pct = 100 if j.get("status") == "done" else (0 if j.get("status") == "failed" else int(prog.get("percent", 0)))
+        step_desc = prog.get("current_step") or badge
 
         df_records.append({
             "Job ID": j["id"][:8] + "...",
             "Chủ đề": j.get("topic", "N/A"),
             "Chế độ": "🛠️ Step-by-Step" if mode == "step_by_step" else "⚡ Auto",
             "Giai đoạn": badge,
+            "Tiến độ": f"{pct}%",
+            "Bước hiện tại": step_desc,
             "Trạng thái": j.get("status", "pending"),
             "Đăng dự kiến": scheduled_str or "—",
             "Mỹ thuật": j.get("art_style", "photorealistic"),
@@ -162,7 +168,7 @@ else:
         c_act1, c_act2, c_act3 = st.columns(3)
 
         with c_act1:
-            if st.button("🔍 Soi Quy Trình (Timeline Feed)", type="primary", use_container_width=True):
+            if st.button("🎬 Mở Trong Phòng Thu 5 Bước", type="primary", use_container_width=True):
                 st.session_state["selected_job_id"] = action_job_id
                 try:
                     st.switch_page("pages/preview_approve.py")

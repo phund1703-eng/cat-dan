@@ -407,18 +407,65 @@ if stage == "source_review":
 # 5 Functional Tabs (Interactive 5-Stage Studio)
 # =============================================================================
 
-tab_script, tab_voice, tab_storyboard, tab_effects, tab_master = st.tabs([
+
+@st.fragment(run_every="2s")
+def render_live_progress_box(jid: str):
+    try:
+        r = requests.get(f"{API_URL}/jobs/{jid}", timeout=1.5)
+        if r.status_code == 200:
+            d = r.json()
+            p = (d.get("pipeline_data") or {}).get("progress") or {}
+            if p.get("is_running_step"):
+                st.info(f"🔄 **Hệ Thống Đang Xử Lý:** {p.get('current_step', 'Đang thực thi...')}")
+                st.progress(max(0.0, min(1.0, float(p.get("percent", 0)) / 100.0)))
+                logs = p.get("logs") or []
+                if logs:
+                    with st.expander("📜 Nhật Ký Xử Lý Trực Tiếp (Live Console)", expanded=True):
+                        for log_line in logs[-6:]:
+                            st.caption(log_line)
+    except Exception:
+        pass
+
+STEP_LABELS = [
     "📝 1. Kịch Bản",
     "🎙️ 2. Âm Thanh",
     "🖼️ 3. Storyboard & Hình Ảnh",
     "🎬 4. Phụ Đề & Hiệu Ứng",
     "🏆 5. Master Video & Phê Duyệt"
-])
+]
+
+if "studio_active_step" not in st.session_state:
+    stage_to_step = {
+        "pending": 0,
+        "script_ready": 0,
+        "source_review": 0,
+        "voice_ready": 1,
+        "assets_ready": 2,
+        "rendering": 3,
+        "done": 4,
+        "approved": 4,
+    }
+    st.session_state["studio_active_step"] = stage_to_step.get(stage, 0)
+
+render_live_progress_box(selected_job_id)
+
+st.markdown("#### 🎛️ Quy Trình 5 Bước:")
+active_step_label = st.radio(
+    "Bước làm việc:",
+    options=STEP_LABELS,
+    index=st.session_state["studio_active_step"],
+    horizontal=True,
+    label_visibility="collapsed",
+    key="studio_stepper_radio"
+)
+st.session_state["studio_active_step"] = STEP_LABELS.index(active_step_label)
+active_step = st.session_state["studio_active_step"]
+
 
 # -----------------------------------------------------------------------------
 # TAB 1: 📝 Kịch Bản (Script Stage)
 # -----------------------------------------------------------------------------
-with tab_script:
+if active_step == 0:
     st.subheader("📝 Giai Đoạn 1: Kịch Bản & Phân Cảnh (Script Stage)")
     st.caption("Xem, chỉnh sửa trực tiếp lời thoại, mô tả hình ảnh, thời lượng cho từng cảnh, hoặc yêu cầu AI viết lại toàn bộ kịch bản.")
 
@@ -468,14 +515,21 @@ with tab_script:
             n_val = st.session_state.get(f"tab1_narr_{selected_job_id}_{idx}", sc.get("narration") or sc.get("text", ""))
             v_val = st.session_state.get(f"tab1_vis_{selected_job_id}_{idx}", sc.get("visual_description") or sc.get("still_image_prompt", ""))
             d_val = st.session_state.get(f"tab1_dur_{selected_job_id}_{idx}", safe_float(sc.get("duration"), 4.0))
-            updated_scenes.append({
+            merged_sc = dict(sc)
+            merged_sc.update({
                 "scene_index": int(sc_idx),
                 "index": int(sc_idx),
                 "narration": str(n_val).strip(),
                 "visual_description": str(v_val).strip(),
                 "still_image_prompt": str(v_val).strip(),
-                "duration": safe_float(d_val, 4.0)
+                "duration": safe_float(d_val, 4.0),
+                "focal_keyword": str(st.session_state.get(f"tab1_focal_{selected_job_id}_{idx}", sc.get("focal_keyword", ""))).strip(),
+                "secondary_keyword": str(st.session_state.get(f"tab1_sec_{selected_job_id}_{idx}", sc.get("secondary_keyword", ""))).strip(),
+                "layout_type": st.session_state.get(f"tab1_layout_{selected_job_id}_{idx}", sc.get("layout_type", "hero_center")),
+                "has_hand": bool(st.session_state.get(f"tab1_hand_{selected_job_id}_{idx}", sc.get("has_hand", False))),
+                "has_camera": bool(st.session_state.get(f"tab1_cam_{selected_job_id}_{idx}", sc.get("has_camera", False))),
             })
+            updated_scenes.append(merged_sc)
 
         save_payload = {
             "title": script_data.get("title", f"Video: {job.get('topic', selected_job_id)}"),
@@ -492,7 +546,8 @@ with tab_script:
             )
             if r_put.status_code == 200:
                 if btn_goto_voice:
-                    st.success("✅ Đã lưu kịch bản! Vui lòng chọn tab **🎙️ 2. Âm Thanh** ở phía trên để tiếp tục.")
+                    st.session_state["studio_active_step"] = 1
+                    st.rerun()
                 else:
                     st.success("✅ Đã lưu kịch bản thành công!")
                 st.rerun()
@@ -563,6 +618,34 @@ with tab_script:
                     step=0.5,
                     key=f"tab1_dur_{selected_job_id}_{idx}"
                 )
+            with st.expander(f"🎨 Đạo Diễn Cắt Dán & Chuyển Động (Cảnh #{sc_num})", expanded=False):
+                col_b1, col_b2 = st.columns(2)
+                with col_b1:
+                    st.text_input(
+                        "Từ khóa vật thể chính (focal_keyword - để AI tách nền):",
+                        value=sc.get("focal_keyword") or "",
+                        key=f"tab1_focal_{selected_job_id}_{idx}"
+                    )
+                    st.text_input(
+                        "Từ khóa vật thể phụ (secondary_keyword):",
+                        value=sc.get("secondary_keyword") or "",
+                        key=f"tab1_sec_{selected_job_id}_{idx}"
+                    )
+                with col_b2:
+                    layout_opts = ["hero_center", "split_2", "diagonal", "rule_of_thirds"]
+                    cur_layout = sc.get("layout_type") or "hero_center"
+                    layout_idx = layout_opts.index(cur_layout) if cur_layout in layout_opts else 0
+                    st.selectbox(
+                        "Bố cục cắt dán (layout_type):",
+                        options=layout_opts,
+                        index=layout_idx,
+                        key=f"tab1_layout_{selected_job_id}_{idx}"
+                    )
+                    col_cb1, col_cb2 = st.columns(2)
+                    with col_cb1:
+                        st.checkbox("Bàn tay dán giấy", value=bool(sc.get("has_hand", False)), key=f"tab1_hand_{selected_job_id}_{idx}")
+                    with col_cb2:
+                        st.checkbox("Ống kính máy ảnh", value=bool(sc.get("has_camera", False)), key=f"tab1_cam_{selected_job_id}_{idx}")
             _srcs = [s for s in (sc.get("sources") or []) if isinstance(s, dict) and s.get("url")]
             if sc.get("fact"):
                 st.caption(f"🔎 **Fact:** {sc.get('fact')}")
@@ -579,7 +662,7 @@ with tab_script:
 # -----------------------------------------------------------------------------
 # TAB 2: 🎙️ Âm Thanh (Voice Stage)
 # -----------------------------------------------------------------------------
-with tab_voice:
+elif active_step == 1:
     st.subheader("🎙️ Giai Đoạn 2: Âm Thanh & Giọng Đọc (Voice Stage)")
     st.caption("Khởi tạo giọng đọc VieNeu-TTS cho toàn bộ kịch bản, nghe thử từng cảnh, sửa lời thoại và sinh lại âm thanh độc lập.")
 
@@ -618,7 +701,8 @@ with tab_voice:
             use_container_width=True,
             key=f"btn_goto_sb_{selected_job_id}"
         ):
-            st.success("🎉 Âm thanh đã sẵn sàng! Vui lòng chọn tab **🖼️ 3. Storyboard & Hình Ảnh** ở phía trên để tiếp tục.")
+            st.session_state["studio_active_step"] = 2
+            st.rerun()
 
     # Scene audio list
     voice_scenes = voice_data.get("scenes") or []
@@ -684,7 +768,7 @@ with tab_voice:
 # -----------------------------------------------------------------------------
 # TAB 3: 🖼️ Storyboard & Hình Ảnh (Image Stage)
 # -----------------------------------------------------------------------------
-with tab_storyboard:
+elif active_step == 2:
     st.subheader("🖼️ Giai Đoạn 3: Storyboard & Gemini Vision Gate (Image Stage)")
     st.caption("Điều phối sinh ảnh toàn bộ theo phong cách mỹ thuật đã chọn, xem điểm thẩm định Vision Gate, sửa prompt sinh lại hoặc tải ảnh tùy chỉnh.")
 
@@ -696,6 +780,15 @@ with tab_storyboard:
         "tier4_procedural": "🎨 Tier 4 (Procedural)",
         "user_uploaded": "📤 User Uploaded"
     }
+
+    # Tùy chỉnh thông số phụ đề
+    c_fx_in1, c_fx_in2, c_fx_in3 = st.columns(3)
+    with c_fx_in1:
+        chunk_words_val = st.slider("Số từ mỗi cụm phụ đề:", min_value=2, max_value=5, value=3, key=f"chunk_words_{selected_job_id}")
+    with c_fx_in2:
+        margin_v_val = st.slider("Vị trí lề dưới (MarginV, px):", min_value=120, max_value=320, value=180, key=f"margin_v_{selected_job_id}")
+    with c_fx_in3:
+        font_size_val = st.slider("Cỡ chữ phụ đề (pt):", min_value=32, max_value=64, value=44, key=f"font_size_{selected_job_id}")
 
     # Primary Action Buttons
     col_sb1, col_sb2 = st.columns([2, 1])
@@ -727,7 +820,8 @@ with tab_storyboard:
             use_container_width=True,
             key=f"btn_goto_effects_{selected_job_id}"
         ):
-            st.success("🎉 Storyboard đã sẵn sàng! Vui lòng chọn tab **🎬 4. Phụ Đề & Hiệu Ứng** ở phía trên để tiếp tục.")
+            st.session_state["studio_active_step"] = 3
+            st.rerun()
 
     # Storyboard Scene Cards
     storyboard = pipeline_data.get("storyboard") or []
@@ -884,9 +978,18 @@ with tab_storyboard:
 # -----------------------------------------------------------------------------
 # TAB 4: 🎬 Phụ Đề & Hiệu Ứng (Effects Stage)
 # -----------------------------------------------------------------------------
-with tab_effects:
+elif active_step == 3:
     st.subheader("🎬 Giai Đoạn 4: Hiệu Ứng Ken Burns & Phụ Đề Karaoke ASS (Effects Stage)")
     st.caption("Khởi tạo phụ đề động Karaoke Dynamic Chunked ASS (2-4 từ/cụm, margin 180px safe zone) và chuẩn bị lệnh FFmpeg hiệu ứng Ken Burns.")
+
+    # Tùy chỉnh thông số phụ đề
+    c_fx_in1, c_fx_in2, c_fx_in3 = st.columns(3)
+    with c_fx_in1:
+        chunk_words_val = st.slider("Số từ mỗi cụm phụ đề:", min_value=2, max_value=5, value=3, key=f"chunk_words_{selected_job_id}")
+    with c_fx_in2:
+        margin_v_val = st.slider("Vị trí lề dưới (MarginV, px):", min_value=120, max_value=320, value=180, key=f"margin_v_{selected_job_id}")
+    with c_fx_in3:
+        font_size_val = st.slider("Cỡ chữ phụ đề (pt):", min_value=32, max_value=64, value=44, key=f"font_size_{selected_job_id}")
 
     # Primary Action Buttons
     col_fx1, col_fx2 = st.columns([2, 1])
@@ -901,7 +1004,7 @@ with tab_effects:
                 try:
                     r_fx = api.post(
                         f"{API_URL}/jobs/{selected_job_id}/step/effects",
-                        json={"chunk_words": 3, "margin_v": 180, "font_size": 44},
+                        json={"chunk_words": chunk_words_val, "margin_v": margin_v_val, "font_size": font_size_val},
                         timeout=30.0
                     )
                     if r_fx.status_code == 200:
@@ -918,7 +1021,8 @@ with tab_effects:
             use_container_width=True,
             key=f"btn_goto_master_{selected_job_id}"
         ):
-            st.success("🎉 Hiệu ứng đã sẵn sàng! Vui lòng chọn tab **🏆 5. Master Video & Phê Duyệt** ở phía trên để render video cuối cùng.")
+            st.session_state["studio_active_step"] = 4
+            st.rerun()
 
     # Technical Specifications
     c_fx_p1, c_fx_p2 = st.columns(2)
@@ -966,7 +1070,7 @@ with tab_effects:
 # -----------------------------------------------------------------------------
 # TAB 5: 🏆 Master Video & Phê Duyệt (Final Stage)
 # -----------------------------------------------------------------------------
-with tab_master:
+elif active_step == 4:
     st.subheader("🏆 Giai Đoạn 5: Master Video & Phê Duyệt Xuất Bản (Final Stage)")
     st.caption("Ghép toàn bộ phân cảnh bằng FFmpeg, xem trước video hoàn chỉnh, chỉnh sửa bản nháp Postiz và phê duyệt xuất bản.")
 

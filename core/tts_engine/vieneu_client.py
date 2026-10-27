@@ -9,6 +9,10 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+# Task 5.5: Singleton cache for VieNeu-TTS models across requests and instances
+_SHARED_TTS_ENGINES: dict = {}
+_CLASS_LOCK = threading.Lock()
+
 
 class VieNeuClient:
     """Client for generating Vietnamese speech on-device CPU using VieNeu-TTS (ONNX int8)."""
@@ -32,21 +36,23 @@ class VieNeuClient:
         self._init_lock = threading.Lock()
 
     def _get_tts(self):
-        """Lazy initialization of Vieneu engine on-device CPU with thread safety."""
-        if self._tts is None:
-            with self._init_lock:
-                if self._tts is None:
+        """Lazy initialization of Vieneu engine on-device CPU with process-wide singleton cache."""
+        key = self.precision
+        if key not in _SHARED_TTS_ENGINES:
+            with _CLASS_LOCK:
+                if key not in _SHARED_TTS_ENGINES:
                     try:
                         from vieneu import Vieneu
                         logger.info(f"Initializing VieNeu-TTS engine (precision={self.precision}, device=CPU)...")
-                        self._tts = Vieneu(precision=self.precision)
-                        logger.success("VieNeu-TTS engine initialized successfully.")
+                        _SHARED_TTS_ENGINES[key] = Vieneu(precision=self.precision)
+                        logger.success("VieNeu-TTS engine initialized successfully (cached in singleton).")
                     except ImportError as ie:
                         logger.error("vieneu package is not installed. Please run: pip install vieneu soundfile")
                         raise RuntimeError(f"VieNeu package missing: {ie}") from ie
                     except Exception as e:
                         logger.error(f"Failed to initialize VieNeu-TTS: {e}")
                         raise RuntimeError(f"VieNeu initialization failed: {e}") from e
+        self._tts = _SHARED_TTS_ENGINES[key]
         return self._tts
 
     def detect_voice_sample(self) -> Optional[str]:

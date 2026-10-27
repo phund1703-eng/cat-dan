@@ -112,6 +112,9 @@ def is_claimable(job, in_flight_ids: Set[str]) -> bool:
     if stage not in RESUMABLE_STAGES:
         # 'source_review' và các stage chờ duyệt khác: chờ người dùng.
         return False
+    pipeline_data = getattr(job, "pipeline_data", {}) or {}
+    if pipeline_data.get("manual_studio_lock"):
+        return False
     if stage == "assets_ready" and (getattr(job, "mode", "auto") or "auto") == "step_by_step":
         # Điểm dừng duyệt storyboard của Step-by-Step Studio.
         return False

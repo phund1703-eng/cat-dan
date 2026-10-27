@@ -225,13 +225,13 @@ if "selected_job_id" in st.session_state:
     st.markdown(f"**Dự án vừa tạo gần nhất:** `{jid}`")
     c1, c2 = st.columns(2)
     with c1:
-        if st.button("🔍 Đến Timeline Feed Inspector ngay", key=f"jump_{jid}", type="primary"):
+        if st.button("🎬 Mở Ngay Trong Phòng Thu 5 Bước", key=f"jump_{jid}", type="primary"):
             try:
                 st.switch_page("pages/preview_approve.py")
             except Exception:
                 st.info("Vui lòng chọn trang 'Xem Trước & Phê Duyệt' từ thanh điều hướng bên trái.")
     with c2:
-        if st.button("📋 Đến Danh Sách Công Việc", key=f"list_{jid}"):
+        if st.button("📋 Xem Toàn Bộ Danh Sách Dự Án", key=f"list_{jid}"):
             try:
                 st.switch_page("pages/job_list.py")
             except Exception:

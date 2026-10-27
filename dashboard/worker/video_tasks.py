@@ -102,6 +102,52 @@ def run_in_async_loop(coro):
         return asyncio.run(coro)
 
 
+def update_job_progress(
+    db: Any,
+    job_id: str,
+    percent: int,
+    current_step: str,
+    scene_current: Optional[int] = None,
+    scene_total: Optional[int] = None,
+    log_line: Optional[str] = None,
+    is_running_step: bool = True,
+) -> Dict[str, Any]:
+    """
+    Cập nhật tiến trình thời gian thực cho job vào pipeline_data['progress'].
+    Cho phép giao diện UI hiển thị thanh tiến độ %, cảnh hiện tại và nhật ký trực tiếp.
+    """
+    job = get_job(db, job_id)
+    if not job:
+        return {}
+    p_data = dict(job.pipeline_data or {})
+    progress = dict(p_data.get("progress") or {})
+    logs = list(progress.get("logs") or [])
+
+    timestamp = datetime.now().strftime("%H:%M:%S")
+    if log_line:
+        clean_log = f"[{timestamp}] {log_line}"
+        logs.append(clean_log)
+        if len(logs) > 30:
+            logs = logs[-30:]
+
+    progress.update({
+        "percent": max(0, min(100, int(percent))),
+        "current_step": current_step,
+        "scene_current": scene_current,
+        "scene_total": scene_total,
+        "is_running_step": is_running_step,
+        "updated_at": timestamp,
+        "logs": logs,
+    })
+    p_data["progress"] = progress
+    job.pipeline_data = p_data
+    try:
+        db.commit()
+    except Exception as e:
+        logger.debug(f"Could not commit progress for job {job_id}: {e}")
+    return progress
+
+
 def _create_synthetic_wav(output_path: str, duration: float = 3.0, sample_rate: int = 24000) -> str:
     """Creates a deterministic valid PCM WAV audio file with gentle 440Hz tone."""
     out = Path(output_path)
@@ -431,8 +477,18 @@ async def _async_execute_stages_2_and_3(job_id: str):
 
         tts_mgr = TTSManager()
         voice_scenes = []
+        is_voice_stage = True
 
+        total_scenes = len(pipeline_data.get("scenes") or [])
         for i, scene in enumerate(pipeline_data["scenes"]):
+            update_job_progress(
+                db, job_id,
+                percent=(25 if is_voice_stage else 50) + int((i / max(1, total_scenes)) * 25),
+                current_step=(f"Đang tạo giọng đọc cho Cảnh {i+1}/{total_scenes}..." if is_voice_stage else f"Đang tạo ảnh phân cảnh cho Cảnh {i+1}/{total_scenes}..."),
+                scene_current=i+1,
+                scene_total=total_scenes,
+                log_line=(f"Đang thu âm Cảnh {i+1}/{total_scenes}" if is_voice_stage else f"Tạo ảnh Cảnh {i+1}/{total_scenes}")
+            )
             audio_path = audio_dir / f"scene_{i:03d}.wav"
             audio_path_str = str(audio_path).replace("\\", "/")
             narration = scene.get("narration", "").strip() or f"Cảnh {i+1} về {job.topic}"
@@ -499,11 +555,21 @@ async def _async_execute_stages_2_and_3(job_id: str):
         art_style_key = getattr(job, "art_style", "photorealistic") or "photorealistic"
         style_mod = STYLE_MODIFIERS.get(art_style_key.lower(), art_style_key)
 
+        is_voice_stage = False
         cascade = CascadeAssetOrchestrator(cache_dir=img_dir)
         img_gen = ImageGenerator()
         storyboard = []
 
+        total_scenes = len(pipeline_data.get("scenes") or [])
         for i, scene in enumerate(pipeline_data["scenes"]):
+            update_job_progress(
+                db, job_id,
+                percent=(25 if is_voice_stage else 50) + int((i / max(1, total_scenes)) * 25),
+                current_step=(f"Đang tạo giọng đọc cho Cảnh {i+1}/{total_scenes}..." if is_voice_stage else f"Đang tạo ảnh phân cảnh cho Cảnh {i+1}/{total_scenes}..."),
+                scene_current=i+1,
+                scene_total=total_scenes,
+                log_line=(f"Đang thu âm Cảnh {i+1}/{total_scenes}" if is_voice_stage else f"Tạo ảnh Cảnh {i+1}/{total_scenes}")
+            )
             base_prompt = scene.get("still_image_prompt") or scene.get("visual_description") or scene.get("narration") or job.topic
             if style_mod.lower() not in base_prompt.lower():
                 visual_prompt = f"{base_prompt}, {style_mod}"
@@ -700,6 +766,7 @@ async def _async_execute_stages_1_to_3(job_id: str):
             logger.warning(f"Could not persist script.json: {e_sjson}")
 
         update_job_stage(db, job_id, "script_ready", status=JobStatus.processing, pipeline_data=pipeline_data)
+        update_job_progress(db, job_id, 25, f"Đã tạo xong kịch bản ({len(scenes_list)} cảnh)", log_line=f"Hoàn thành kịch bản ({len(scenes_list)} cảnh)")
         logger.success(f"--- [Job {job_id}] STAGE 1 COMPLETE: script_ready ({len(scenes_list)} scenes) ---")
 
         # -------------------------------------------------------------
@@ -715,6 +782,7 @@ async def _async_execute_stages_1_to_3(job_id: str):
             gate = {"audit": [], "blocking": [], "has_blocking": False}
         pipeline_data["source_audit"] = gate["audit"]
         update_job_stage(db, job_id, "script_ready", status=JobStatus.processing, pipeline_data=pipeline_data)
+        update_job_progress(db, job_id, 25, f"Đã tạo xong kịch bản ({len(scenes_list)} cảnh)", log_line=f"Hoàn thành kịch bản ({len(scenes_list)} cảnh)")
 
         if getattr(job, "mode", "auto") == "auto" and gate["has_blocking"]:
             update_job_stage(db, job_id, "source_review", status=JobStatus.processing, pipeline_data=pipeline_data)
@@ -1013,7 +1081,9 @@ def _execute_stages_4_and_5(db, job_id: str):
             logger.warning(f"Thumbnail generation failed for job {job_id}: {e_thumb}")
             pipeline_data["thumbnail_error"] = str(e_thumb)
 
+    pipeline_data["manual_studio_lock"] = False
     update_job_stage(db, job_id, "done", status=JobStatus.done, pipeline_data=pipeline_data)
+    update_job_progress(db, job_id, 100, "Hoàn tất xuất Master Video!", log_line="Master video đã sẵn sàng", is_running_step=False)
     logger.success(f"🏆 [Job {job_id}] STAGE 5 COMPLETE: Pipeline finished successfully (status=done)!")
 
 
@@ -1077,6 +1147,7 @@ def continue_after_source_review(job_id: str) -> dict:
             return {"status": "blocked", "job_id": job_id, "blocking_scenes": gate["blocking"], "source_audit": gate["audit"]}
 
         update_job_stage(db, job_id, "script_ready", status=JobStatus.processing, pipeline_data=pipeline_data)
+        update_job_progress(db, job_id, 25, f"Đã tạo xong kịch bản ({len(scenes_list)} cảnh)", log_line=f"Hoàn thành kịch bản ({len(scenes_list)} cảnh)")
         logger.success(f"✅ [Job {job_id}] Source Gate passed; resuming stages 2-5.")
     finally:
         db.close()
@@ -1128,6 +1199,9 @@ def resume_video_pipeline(job_id: str) -> Dict[str, Any]:
         return {"job_id": job_id, "action": "skipped", "stage": stage, "reason": f"terminal_status:{status}"}
     if stage in _WAITING_STAGES:
         return {"job_id": job_id, "action": "waiting", "stage": stage, "reason": "needs_user_action"}
+    p_data = getattr(job, "pipeline_data", {}) or {}
+    if p_data.get("manual_studio_lock"):
+        return {"job_id": job_id, "action": "waiting", "stage": stage, "reason": "manual_studio_lock"}
     if stage == "assets_ready" and mode == "step_by_step":
         return {"job_id": job_id, "action": "waiting", "stage": stage, "reason": "step_by_step_review"}
 
@@ -1185,6 +1259,7 @@ def regenerate_scene_asset(job_id: str, scene_index: int, prompt: str) -> dict:
         if style_mod.lower() not in styled_prompt.lower():
             styled_prompt = f"{styled_prompt}, {style_mod}"
 
+        is_voice_stage = False
         cascade = CascadeAssetOrchestrator(cache_dir=img_dir)
         img_gen = ImageGenerator()
 

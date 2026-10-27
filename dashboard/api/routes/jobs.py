@@ -491,6 +491,9 @@ async def step_generate_script(
                 scene_item[k] = v
         scenes_list.append(scene_item)
     p_data["scenes"] = scenes_list
+    p_data["manual_studio_lock"] = True
+    from dashboard.worker.video_tasks import update_job_progress
+    update_job_progress(db, job_id, 25, f"Đã tạo kịch bản ({len(scenes_list)} cảnh)", log_line=f"Hoàn thành kịch bản ({len(scenes_list)} cảnh)", is_running_step=False)
 
     db_job = update_job_stage(db, job_id, stage="script_ready", status=JobStatus.processing, pipeline_data=p_data)
     db_job = update_job_output(db, job_id, script=p_data["script"])
@@ -541,6 +544,9 @@ def step_update_script(
 
     script_data["scenes"] = updated_scenes
     p_data["scenes"] = updated_scenes
+    p_data["manual_studio_lock"] = True
+    from dashboard.worker.video_tasks import update_job_progress
+    update_job_progress(db, job_id, 25, f"Đã lưu kịch bản ({len(updated_scenes)} cảnh)", log_line="Đã cập nhật kịch bản thủ công", is_running_step=False)
 
     job_dir = Path("data/output") / job_id
     job_dir.mkdir(parents=True, exist_ok=True)
@@ -645,6 +651,9 @@ async def step_synthesize_voice(
         "scenes": voice_scenes
     }
     p_data["scenes"] = scenes
+    p_data["manual_studio_lock"] = True
+    from dashboard.worker.video_tasks import update_job_progress
+    update_job_progress(db, job_id, 80, "Đã chuẩn bị xong hiệu ứng và phụ đề", log_line="Đã tạo hiệu ứng và phụ đề ASS", is_running_step=False)
     if "script" in p_data and isinstance(p_data["script"], dict):
         for sc in p_data["script"].get("scenes", []):
             s_idx = sc.get("index", sc.get("scene_index"))
@@ -654,6 +663,9 @@ async def step_synthesize_voice(
                     sc["audio_path"] = vsc["audio_path"]
                     break
 
+    p_data["manual_studio_lock"] = True
+    from dashboard.worker.video_tasks import update_job_progress
+    update_job_progress(db, job_id, 50, f"Đã hoàn thành giọng đọc ({len(voice_scenes)} cảnh)", log_line="Đã tạo giọng đọc cho tất cả cảnh", is_running_step=False)
     db_job = update_job_stage(db, job_id, stage="voice_ready", status=JobStatus.processing, pipeline_data=p_data)
     db.commit()
     db.refresh(db_job)
@@ -895,6 +907,9 @@ async def step_generate_storyboard(
 
     p_data["storyboard"] = storyboard
     p_data["scenes"] = scenes
+    p_data["manual_studio_lock"] = True
+    from dashboard.worker.video_tasks import update_job_progress
+    update_job_progress(db, job_id, 80, "Đã chuẩn bị xong hiệu ứng và phụ đề", log_line="Đã tạo hiệu ứng và phụ đề ASS", is_running_step=False)
     db_job = update_job_stage(db, job_id, stage="assets_ready", status=JobStatus.processing, pipeline_data=p_data)
     db.commit()
     db.refresh(db_job)
@@ -1167,6 +1182,9 @@ def _do_effects(
     }
     p_data["ffmpeg_commands"] = ffmpeg_cmds
     p_data["scenes"] = scenes
+    p_data["manual_studio_lock"] = True
+    from dashboard.worker.video_tasks import update_job_progress
+    update_job_progress(db, job_id, 80, "Đã chuẩn bị xong hiệu ứng và phụ đề", log_line="Đã tạo hiệu ứng và phụ đề ASS", is_running_step=False)
 
     db_job = update_job_stage(db, job_id, stage="rendering", status=JobStatus.processing, pipeline_data=p_data)
     db.commit()
@@ -1202,7 +1220,8 @@ def _do_render(
     if not scenes:
         raise HTTPException(status_code=400, detail="No scenes available to render video. Please generate script first.")
 
-    from dashboard.worker.video_tasks import _execute_stages_4_and_5
+    from dashboard.worker.video_tasks import _execute_stages_4_and_5, update_job_progress
+    update_job_progress(db, job_id, 80, "Đang dựng video và hiệu ứng...", log_line="Bắt đầu kết xuất Master Video", is_running_step=True)
     _execute_stages_4_and_5(db, job_id)
 
     db.expire_all()
