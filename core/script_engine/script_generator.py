@@ -17,7 +17,7 @@ class ScriptGenerator:
         """Initializes the ScriptGenerator."""
         self.client = GeminiClient()
 
-    async def generate(self, topic: str, style: str, language: str = 'vi', duration: int = 60, quality: str = 'standard') -> Dict[str, Any]:
+    async def generate(self, topic: str, style: str, language: str = 'vi', duration: int = 60, quality: str = 'standard', script_style_id: str = None, custom_tone_instruction: str = None) -> Dict[str, Any]:
         """
         Generates a complete video script.
 
@@ -33,7 +33,16 @@ class ScriptGenerator:
         """
         model = self.client.pro_model if quality == 'premium' else self.client.default_model
         
-        logger.info(f"Generating script '{topic}' | Style: {style} | Lang: {language} | Quality: {quality}")
+        logger.info(f"Generating script '{topic}' | Style: {style} | Lang: {language} | Quality: {quality} | Preset: {script_style_id}")
+        tone_instruction = custom_tone_instruction
+        if not tone_instruction and script_style_id:
+            try:
+                from .script_style_presets import get_script_style_by_id
+                st_obj = get_script_style_by_id(script_style_id)
+                if st_obj:
+                    tone_instruction = st_obj.get("tone_instruction")
+            except Exception as e_st:
+                logger.debug(f"Could not load script style {script_style_id}: {e_st}")
         
         if not self.client.api_keys:
             logger.warning("No valid Gemini API key found. Using high-quality collage template script...")
@@ -50,7 +59,8 @@ class ScriptGenerator:
                 style=style,
                 language=language,
                 duration=duration,
-                model=model
+                model=model,
+                tone_instruction=tone_instruction
             )
         except Exception as e_gemini:
             logger.warning(f"ScriptGenerator: Gemini API unavailable or quota limit reached ({e_gemini}). Using dynamic topic-aware fallback script...")
@@ -535,3 +545,148 @@ class ScriptGenerator:
             logger.info(f"Saved script to {filepath}")
         except Exception as e:
             logger.error(f"Failed to save script {job_id}: {e}")
+
+    def _extract_keyword_from_text(self, text: str, fallback_topic: str = "") -> str:
+        """Extracts 1-2 salient focal keywords from scene text for collage search/prompts."""
+        if not text:
+            return fallback_topic or "concept"
+        clean = re.sub(r'[^\w\s]', ' ', text.lower()).strip()
+        words = [w for w in clean.split() if len(w) > 2]
+        stop_words = {
+            "của", "và", "các", "một", "những", "khi", "trong", "cho", "với", "được",
+            "này", "đã", "sẽ", "đang", "thì", "ở", "ra", "vào", "lại", "lên", "xuống",
+            "về", "đến", "từ", "đó", "như", "nhưng", "bởi", "vì", "nếu", "bạn", "chúng",
+            "ta", "họ", "mình", "người", "biết", "không", "thể", "cũng", "rất", "quá",
+            "nhiều", "ít", "hơn", "nhất", "làm", "the", "and", "that", "this", "with",
+            "from", "have", "what", "when", "where", "which", "your", "they", "will"
+        }
+        filtered = [w for w in words if w not in stop_words]
+        if len(filtered) >= 2:
+            return f"{filtered[0]} {filtered[1]}"
+        elif len(filtered) == 1:
+            return filtered[0]
+        return fallback_topic[:30] if fallback_topic else "visual focus"
+
+    def _split_text_to_chunks(self, raw_text: str) -> list:
+        """
+        Splits raw user script into balanced chunks (approx 12-25 words each)
+        preserving 100% of user text verbatim.
+        """
+        raw_text = raw_text.strip()
+        if not raw_text:
+            return []
+
+        lines = [line.strip() for line in raw_text.splitlines() if line.strip()]
+        if not lines:
+            lines = [raw_text]
+
+        raw_chunks = []
+        for line in lines:
+            sentences = re.split(r'(?<=[.?!;])\s+', line)
+            for s in sentences:
+                s = s.strip()
+                if not s:
+                    continue
+                words = s.split()
+                if len(words) > 25:
+                    parts = re.split(r'(?<=[,:\-])\s+', s)
+                    current_sub = []
+                    for p in parts:
+                        p = p.strip()
+                        if not p:
+                            continue
+                        sub_words = p.split()
+                        if len(current_sub) + len(sub_words) <= 22:
+                            current_sub.extend(sub_words)
+                        else:
+                            if current_sub:
+                                raw_chunks.append(" ".join(current_sub))
+                            current_sub = list(sub_words)
+                    if current_sub:
+                        raw_chunks.append(" ".join(current_sub))
+                else:
+                    raw_chunks.append(s)
+
+        merged_chunks = []
+        for chunk in raw_chunks:
+            if not merged_chunks:
+                merged_chunks.append(chunk)
+            else:
+                last_chunk = merged_chunks[-1]
+                last_words = last_chunk.split()
+                chunk_words = chunk.split()
+                if len(chunk_words) < 4 and (len(last_words) + len(chunk_words) <= 25):
+                    merged_chunks[-1] = f"{last_chunk} {chunk}"
+                elif len(last_words) < 4 and (len(last_words) + len(chunk_words) <= 25):
+                    merged_chunks[-1] = f"{last_chunk} {chunk}"
+                else:
+                    merged_chunks.append(chunk)
+
+        return merged_chunks if merged_chunks else [raw_text]
+
+    def parse_custom_script_into_scenes(self, raw_text: str, topic: str = "", style: str = "cutout_paper_vintage", language: str = "vi") -> Dict[str, Any]:
+        """
+        Parses user-provided script text into video scenes.
+        Preserves 100% of user text verbatim while calculating durations,
+        extracting focal keywords, and generating collage prompts.
+        """
+        chunks = self._split_text_to_chunks(raw_text)
+        if not chunks:
+            chunks = ["Nội dung kịch bản."]
+
+        layout_choices = ["center_hero", "split_horizontal", "split_vertical", "minimal_bottom"]
+        color_choices = [
+            ("cream paper", "FDFBF7"),
+            ("sage paper", "E6EBE0"),
+            ("warm craft paper", "EDE4D0"),
+            ("slate paper", "DCE2E6")
+        ]
+
+        scenes = []
+        clean_topic = topic.strip() if topic else (chunks[0][:40] + ("..." if len(chunks[0]) > 40 else ""))
+
+        for i, chunk in enumerate(chunks):
+            scene_id = i + 1
+            words = chunk.split()
+            dur = max(3.5, min(8.0, round(len(words) / 2.6, 1)))
+            focal_kw = self._extract_keyword_from_text(chunk, clean_topic)
+            layout = layout_choices[i % len(layout_choices)]
+            color_field, color_hex = color_choices[i % len(color_choices)]
+            
+            prompt = self._create_still_image_prompt(
+                visual_metaphor=f"concept of {focal_kw}",
+                color_field=color_field,
+                color_hex=color_hex
+            )
+
+            scene = {
+                "scene_id": scene_id,
+                "narration": chunk,
+                "voiceover": chunk,
+                "duration": dur,
+                "visual_metaphor": f"Hình ảnh phong cách cắt dán về {focal_kw}",
+                "focal_keyword": focal_kw,
+                "secondary_keyword": clean_topic,
+                "layout_type": layout,
+                "has_hand": (i % 2 == 1),
+                "has_camera": (i % 3 == 0),
+                "image_prompt": prompt,
+                "music_mood": "documentary, thoughtful, subtle acoustic",
+                "core_meaning": chunk[:80]
+            }
+            scenes.append(scene)
+
+        job_id = str(uuid.uuid4())[:8]
+        script = {
+            "title": clean_topic,
+            "topic": clean_topic,
+            "style": style,
+            "language": language,
+            "script_origin": "custom_script",
+            "scenes": scenes,
+            "job_id": job_id
+        }
+        normalize_script_scenes(script)
+        script["estimated_duration"] = self.estimate_duration(script)
+        self._save_script(script, job_id)
+        return script

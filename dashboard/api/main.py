@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.staticfiles import StaticFiles
 from loguru import logger
 from dashboard.api.database import create_tables
-from dashboard.api.routes import jobs, channels
+from dashboard.api.routes import jobs, channels, script_styles
 from dashboard.api.security import ApiKeyMiddleware, is_auth_enabled
 from dashboard.api.upload_validation import validate_audio_upload
 
@@ -39,6 +39,7 @@ app.mount("/assets", StaticFiles(directory="assets"), name="assets")
 # Include API routers
 app.include_router(jobs.router, prefix="/jobs", tags=["Jobs"])
 app.include_router(channels.router, prefix="/channels", tags=["Channels"])
+app.include_router(script_styles.router, prefix="/script-styles", tags=["Script Styles"])
 
 @app.on_event("startup")
 async def startup_event():

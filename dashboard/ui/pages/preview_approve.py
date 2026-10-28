@@ -1,3 +1,4 @@
+from core.script_engine.script_style_presets import get_all_script_styles
 """
 Studio Tương Tác 5 Bước & Phê Duyệt Video (Requirement R3)
 dashboard/ui/pages/preview_approve.py
@@ -481,6 +482,20 @@ if active_step == 0:
         st.markdown("**AI Prompt Nguyên Văn (Gemini Engine):**")
         st.code(prompt_text, language="markdown")
 
+    # Phong cách kịch bản AI
+    all_st = get_all_script_styles()
+    st_dict = {s["id"]: s for s in all_st}
+    col_st_sel, col_st_desc = st.columns([2, 1])
+    with col_st_sel:
+        quick_style = st.selectbox(
+            "🎭 Chọn Phong Cách Viết Kịch Bản Cho AI:",
+            options=list(st_dict.keys()),
+            format_func=lambda sid: st_dict[sid].get("name", sid),
+            key=f"quick_style_sel_{selected_job_id}"
+        )
+    with col_st_desc:
+        st.caption(f"🎯 *Khán giả:* {st_dict.get(quick_style, {}).get('target_audience', 'Mọi lứa tuổi')}")
+
     # Action Buttons Bar
     col_s1, col_s2, col_s3 = st.columns([1, 1, 1])
 
@@ -576,9 +591,10 @@ if active_step == 0:
     if btn_regen_script:
         with st.spinner("Đang yêu cầu Gemini AI viết lại kịch bản chuẩn cho chủ đề..."):
             try:
+                preset_to_use = st.session_state.get(f"quick_style_sel_{selected_job_id}", "storytelling_mystery")
                 r_post = api.post(
                     f"{API_URL}/jobs/{selected_job_id}/step/script",
-                    json={"topic": job.get("topic"), "art_style": art_style},
+                    json={"topic": job.get("topic"), "art_style": art_style, "script_style_id": preset_to_use},
                     timeout=30.0
                 )
                 if r_post.status_code == 200:
@@ -657,7 +673,91 @@ if active_step == 0:
                     st.markdown(f"- [{_label}]({_s['url']}){_pub}")
             st.markdown("<hr style='margin:10px 0; border:none; border-top:1px solid #333;'>", unsafe_allow_html=True)
     else:
-        st.info("Kịch bản chưa được khởi tạo. Bạn có thể nhấn nút **[🔄 Viết Lại Kịch Bản Với AI]** ở trên để sinh tự động từ chủ đề.")
+        st.warning("⚠️ **Dự án chưa có kịch bản hoặc phân cảnh.** Bạn có toàn quyền chủ động chọn 1 trong các cách dưới đây:")
+
+        hub_tab_ai, hub_tab_custom, hub_tab_auto = st.tabs([
+            "🤖 Cách 1: AI Tự Động Viết Theo Phong Cách",
+            "📝 Cách 2: Tự Dán Lời Thoại / Kịch Bản Sẵn Có",
+            "⚡ Cách 3: Chuyển Sang Chế Độ Tự Động (Auto)"
+        ])
+
+        with hub_tab_ai:
+            st.markdown("Chọn phong cách viết và để AI tự sáng tạo kịch bản chuẩn cho video:")
+            col_ai1, col_ai2 = st.columns([2, 1])
+            with col_ai1:
+                topic_ai = st.text_input("Chủ đề kịch bản:", value=job.get("topic", ""), key=f"hub_topic_{selected_job_id}")
+                hub_style_sel = st.selectbox(
+                    "Phong cách kịch bản:",
+                    options=list(st_dict.keys()),
+                    format_func=lambda sid: st_dict[sid].get("name", sid),
+                    key=f"hub_style_sel_{selected_job_id}"
+                )
+            with col_ai2:
+                dur_ai = st.selectbox("Thời lượng dự kiến:", options=[30, 60, 90], index=1, format_func=lambda d: f"{d} giây", key=f"hub_dur_{selected_job_id}")
+                st.write("")
+                st.write("")
+                if st.button("🚀 AI Viết Kịch Bản Ngay", type="primary", use_container_width=True, key=f"hub_btn_ai_{selected_job_id}"):
+                    with st.spinner("AI đang tạo kịch bản..."):
+                        try:
+                            payload = {
+                                "script_mode": "ai_generate",
+                                "topic": topic_ai.strip() or job.get("topic", "Chủ đề video"),
+                                "script_style_id": hub_style_sel,
+                                "duration": dur_ai
+                            }
+                            r_init = api.post(f"{API_URL}/jobs/{selected_job_id}/initialize-script", json=payload, timeout=30.0)
+                            if r_init.status_code == 200:
+                                st.success("🎉 Đã tạo kịch bản thành công!")
+                                st.rerun()
+                            else:
+                                st.error(f"Lỗi tạo kịch bản: {r_init.text}")
+                        except Exception as e_init:
+                            st.error(f"Lỗi kết nối: {e_init}")
+
+        with hub_tab_custom:
+            st.markdown("Dán kịch bản hoặc lời thoại của bạn vào đây (AI sẽ giữ nguyên 100% câu từ, không tự ý sửa đổi):")
+            custom_txt = st.text_area(
+                "Nội dung kịch bản / bài viết:",
+                height=150,
+                placeholder="Dán toàn bộ bài viết, đoạn thoại hoặc lời bình vào đây...",
+                key=f"hub_custom_txt_{selected_job_id}"
+            )
+            col_c1, col_c2 = st.columns([2, 1])
+            with col_c1:
+                custom_topic = st.text_input("Tiêu đề / Chủ đề (tuỳ chọn):", value=job.get("topic", ""), key=f"hub_custom_topic_{selected_job_id}")
+            with col_c2:
+                st.write("")
+                st.write("")
+                if st.button("📥 Nạp Kịch Bản & Tách Cảnh", type="primary", use_container_width=True, key=f"hub_btn_custom_{selected_job_id}"):
+                    if not custom_txt.strip():
+                        st.error("Vui lòng dán nội dung kịch bản!")
+                    else:
+                        with st.spinner("Đang tách phân cảnh và tạo prompt hình ảnh..."):
+                            try:
+                                payload = {
+                                    "script_mode": "custom_script",
+                                    "custom_script_text": custom_txt.strip(),
+                                    "topic": custom_topic.strip() or custom_txt.strip()[:40]
+                                }
+                                r_init = api.post(f"{API_URL}/jobs/{selected_job_id}/initialize-script", json=payload, timeout=15.0)
+                                if r_init.status_code == 200:
+                                    st.success("🎉 Đã nạp kịch bản thành công! Các phân cảnh đã sẵn sàng để bạn duyệt.")
+                                    st.rerun()
+                                else:
+                                    st.error(f"Lỗi nạp kịch bản: {r_init.text}")
+                            except Exception as e_init:
+                                st.error(f"Lỗi kết nối: {e_init}")
+
+        with hub_tab_auto:
+            st.markdown("Nếu bạn muốn hệ thống tự động chạy toàn bộ quy trình từ A đến Z mà không cần duyệt từng bước:")
+            if st.button("⚡ Chuyển Sang Tự Động & Chạy Ngay", type="primary", key=f"hub_btn_auto_{selected_job_id}"):
+                with st.spinner("Đang kích hoạt quy trình tự động..."):
+                    try:
+                        r_init = api.post(f"{API_URL}/jobs/{selected_job_id}/continue-render", json={}, timeout=10.0)
+                        st.success("Đã kích hoạt chế độ tự động! Bạn có thể theo dõi tiến trình trực tiếp bên trên.")
+                        st.rerun()
+                    except Exception as e_auto:
+                        st.error(f"Lỗi kích hoạt: {e_auto}")
 
 # -----------------------------------------------------------------------------
 # TAB 2: 🎙️ Âm Thanh (Voice Stage)

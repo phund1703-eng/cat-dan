@@ -710,21 +710,30 @@ async def _async_execute_stages_1_to_3(job_id: str):
         # -------------------------------------------------------------
         logger.info(f"--- [Job {job_id}] STAGE 1: Generating Script ---")
         script_gen = ScriptGenerator()
-        try:
-            script = await script_gen.generate(
-                topic=job.topic,
-                style=job.style or "collage_broll",
-                language=job.language or "vi",
-                duration=60
-            )
-        except Exception as e_script:
-            logger.warning(f"ScriptGenerator failed ({e_script}), using fallback script template")
-            script = script_gen._generate_fallback_script(
-                topic=job.topic,
-                style=job.style or "collage_broll",
-                language=job.language or "vi",
-                duration=30
-            )
+        existing_script = pipeline_data.get("script")
+        if existing_script and isinstance(existing_script, dict) and existing_script.get("scenes"):
+            logger.info(f"Reusing existing script for job {job_id} with {len(existing_script.get('scenes', []))} scenes")
+            script = existing_script
+        else:
+            preset_id = pipeline_data.get("script_style_id")
+            tone_inst = pipeline_data.get("custom_tone_instruction")
+            try:
+                script = await script_gen.generate(
+                    topic=job.topic,
+                    style=job.style or "collage_broll",
+                    language=job.language or "vi",
+                    duration=60,
+                    script_style_id=preset_id,
+                    custom_tone_instruction=tone_inst
+                )
+            except Exception as e_script:
+                logger.warning(f"ScriptGenerator failed ({e_script}), using fallback script template")
+                script = script_gen._generate_fallback_script(
+                    topic=job.topic,
+                    style=job.style or "collage_broll",
+                    language=job.language or "vi",
+                    duration=30
+                )
 
         pipeline_data["script"] = {
             "title": script.get("title", f"Video about {job.topic}"),
@@ -766,7 +775,7 @@ async def _async_execute_stages_1_to_3(job_id: str):
             logger.warning(f"Could not persist script.json: {e_sjson}")
 
         update_job_stage(db, job_id, "script_ready", status=JobStatus.processing, pipeline_data=pipeline_data)
-        update_job_progress(db, job_id, 25, f"Đã tạo xong kịch bản ({len(scenes_list)} cảnh)", log_line=f"Hoàn thành kịch bản ({len(scenes_list)} cảnh)")
+        update_job_progress(db, job_id, 25, f"Đã tạo xong kịch bản ({len(scenes or [])} cảnh)", log_line=f"Hoàn thành kịch bản ({len(scenes or [])} cảnh)")
         logger.success(f"--- [Job {job_id}] STAGE 1 COMPLETE: script_ready ({len(scenes_list)} scenes) ---")
 
         # -------------------------------------------------------------
@@ -782,7 +791,7 @@ async def _async_execute_stages_1_to_3(job_id: str):
             gate = {"audit": [], "blocking": [], "has_blocking": False}
         pipeline_data["source_audit"] = gate["audit"]
         update_job_stage(db, job_id, "script_ready", status=JobStatus.processing, pipeline_data=pipeline_data)
-        update_job_progress(db, job_id, 25, f"Đã tạo xong kịch bản ({len(scenes_list)} cảnh)", log_line=f"Hoàn thành kịch bản ({len(scenes_list)} cảnh)")
+        update_job_progress(db, job_id, 25, f"Đã tạo xong kịch bản ({len(scenes or [])} cảnh)", log_line=f"Hoàn thành kịch bản ({len(scenes or [])} cảnh)")
 
         if getattr(job, "mode", "auto") == "auto" and gate["has_blocking"]:
             update_job_stage(db, job_id, "source_review", status=JobStatus.processing, pipeline_data=pipeline_data)
@@ -1147,7 +1156,7 @@ def continue_after_source_review(job_id: str) -> dict:
             return {"status": "blocked", "job_id": job_id, "blocking_scenes": gate["blocking"], "source_audit": gate["audit"]}
 
         update_job_stage(db, job_id, "script_ready", status=JobStatus.processing, pipeline_data=pipeline_data)
-        update_job_progress(db, job_id, 25, f"Đã tạo xong kịch bản ({len(scenes_list)} cảnh)", log_line=f"Hoàn thành kịch bản ({len(scenes_list)} cảnh)")
+        update_job_progress(db, job_id, 25, f"Đã tạo xong kịch bản ({len(scenes or [])} cảnh)", log_line=f"Hoàn thành kịch bản ({len(scenes or [])} cảnh)")
         logger.success(f"✅ [Job {job_id}] Source Gate passed; resuming stages 2-5.")
     finally:
         db.close()

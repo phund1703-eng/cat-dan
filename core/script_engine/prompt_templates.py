@@ -12,7 +12,7 @@ class PromptTemplates:
     }
 
     @staticmethod
-    def get_script_prompt(topic: str, style: str, language: str, duration: int = 60) -> str:
+    def get_script_prompt(topic: str, style: str, language: str, duration: int = 60, tone_instruction: str = None) -> str:
         """
         Generates the full prompt string for Gemini to create a video script.
 
@@ -28,11 +28,13 @@ class PromptTemplates:
         style_desc = PromptTemplates.VIDEO_STYLES.get(style, "Standard engaging video style.")
         collage_rule_vi = ""
         collage_rule_en = ""
+        tone_section = f"\nYÊU CẦU ĐẶC BIỆT VỀ PHONG CÁCH VÀ GIỌNG ĐIỆU HÀNH VĂN (TONE OF VOICE):\n{tone_instruction.strip()}\n- Hãy đảm bảo toàn bộ lời thoại (narration) của các cảnh thể hiện triệt để phong cách này!\n" if tone_instruction and tone_instruction.strip() else ""
         if style == "collage_broll":
             if language == 'vi':
                 return f"""Bạn là một biên kịch và giám đốc nghệ thuật video chuyên nghiệp theo phong cách editorial paper-collage stop-motion chuẩn repo gbro-collage-broll.
 Hãy viết một kịch bản video về chủ đề: "{topic}".
 Thời lượng dự kiến: khoảng {duration} giây (khoảng {max(3, duration // 7)} đến {max(4, duration // 6)} cảnh, mỗi cảnh 5-8 giây).
+{tone_section}
 
 QUY TẮC BẮT BUỘC CHO TỪNG CẢNH (SCENE):
 1. topic_domain: Xác định 1 trong các lĩnh vực sau: "space", "biology", "geography", "history", "psychology", "technology".

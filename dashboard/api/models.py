@@ -50,7 +50,7 @@ class SourceRef(BaseModel):
 
 
 class CreateJobRequest(BaseModel):
-    topic: str
+    topic: str = ""
     style: VideoStyle
     language: Language = Language.vi
     format: VideoFormat = VideoFormat.shorts
@@ -59,6 +59,10 @@ class CreateJobRequest(BaseModel):
     mode: str = "auto"
     art_style: str = "photorealistic"
     voice_preset: str = "default"
+    script_mode: Optional[str] = "ai_generate"  # "ai_generate" | "custom_script"
+    custom_script_text: Optional[str] = None
+    script_style_id: Optional[str] = None
+    custom_tone_instruction: Optional[str] = None
 
     @field_validator("mode")
     @classmethod
@@ -113,6 +117,16 @@ class ApproveJobRequest(BaseModel):
 class StepScriptGenerateRequest(BaseModel):
     topic: Optional[str] = None
     art_style: Optional[str] = None
+    duration: Optional[int] = 60
+    script_style_id: Optional[str] = None
+    custom_tone_instruction: Optional[str] = None
+
+class StepInitializeScriptRequest(BaseModel):
+    script_mode: str = "ai_generate"  # "ai_generate" | "custom_script"
+    custom_script_text: Optional[str] = None
+    script_style_id: Optional[str] = None
+    custom_tone_instruction: Optional[str] = None
+    topic: Optional[str] = None
     duration: Optional[int] = 60
 
 class UpdateScriptRequest(BaseModel):

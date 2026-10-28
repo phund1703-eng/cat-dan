@@ -129,7 +129,7 @@ class GeminiClient:
         logger.error(f"All candidate models {candidate_models} failed for generate. Last error: {last_error}")
         raise last_error or RuntimeError("Failed to generate text after testing all candidate models")
 
-    async def generate_script(self, topic: str, style: str, language: str, duration: int = 60, model: str = None) -> Dict[str, Any]:
+    async def generate_script(self, topic: str, style: str, language: str, duration: int = 60, model: str = None, tone_instruction: str = None) -> Dict[str, Any]:
         """
         Generates a video script structured as JSON with automatic key failover and dynamic model fallback.
         Calls gen_model.generate_content via asyncio.to_thread to prevent gRPC loop conflicts on Windows.
@@ -137,7 +137,7 @@ class GeminiClient:
         from .prompt_templates import PromptTemplates
         from .scene_schema import normalize_script_scenes
 
-        prompt = PromptTemplates.get_script_prompt(topic, style, language, duration)
+        prompt = PromptTemplates.get_script_prompt(topic, style, language, duration, tone_instruction=tone_instruction)
         candidate_models = self._get_candidate_models(model)
         
         generation_config = genai.types.GenerationConfig(

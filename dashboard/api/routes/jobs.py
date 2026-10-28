@@ -20,6 +20,7 @@ from dashboard.api.models import (
     RegenerateSceneRequest,
     ContinueRenderRequest,
     StepScriptGenerateRequest,
+    StepInitializeScriptRequest,
     UpdateScriptRequest,
     StepVoiceRequest,
     VoiceSceneRequest,
@@ -221,20 +222,79 @@ def create_new_job(
     style_val = request.style.value if hasattr(request.style, "value") else str(request.style)
     lang_val = request.language.value if hasattr(request.language, "value") else str(request.language)
 
+    p_data = {
+        "script_style_id": request.script_style_id,
+        "custom_tone_instruction": request.custom_tone_instruction,
+        "script_mode": request.script_mode or "ai_generate"
+    }
+
+    initial_stage = "pending"
+    parsed_script = None
+
+    if request.script_mode == "custom_script" and request.custom_script_text and request.custom_script_text.strip():
+        try:
+            from core.script_engine.script_generator import ScriptGenerator
+            script_gen = ScriptGenerator()
+            effective_topic = request.topic.strip() if request.topic and request.topic.strip() else request.custom_script_text.strip()[:40]
+            parsed_script = script_gen.parse_custom_script_into_scenes(
+                raw_text=request.custom_script_text.strip(),
+                topic=effective_topic,
+                style=style_val,
+                language=lang_val
+            )
+            initial_stage = "script_ready"
+            p_data["script_origin"] = "custom_script"
+            p_data["script"] = parsed_script
+            raw_scenes = parsed_script.get("scenes", [])
+            scenes_list = []
+            for i, s in enumerate(raw_scenes):
+                sc = {
+                    "scene_index": i,
+                    "index": i,
+                    "narration": s.get("narration") or s.get("voiceover") or "",
+                    "visual_description": s.get("visual_description", ""),
+                    "still_image_prompt": s.get("still_image_prompt", "") or s.get("image_prompt", "") or s.get("narration", ""),
+                    "duration": float(s.get("duration", 4.0))
+                }
+                for k, v in s.items():
+                    if k not in sc:
+                        sc[k] = v
+                scenes_list.append(sc)
+            p_data["scenes"] = scenes_list
+
+            job_dir = Path("data/output") / job_id
+            job_dir.mkdir(parents=True, exist_ok=True)
+            with open(job_dir / "script.json", "w", encoding="utf-8") as f:
+                json.dump(parsed_script, f, ensure_ascii=False, indent=2)
+            logger.info(f"Custom script parsed with {len(scenes_list)} scenes for job {job_id}")
+        except Exception as e_parse:
+            logger.warning(f"Failed to pre-parse custom script ({e_parse}), keeping job pending")
+
+    effective_topic = request.topic.strip() if request.topic and request.topic.strip() else (
+        request.custom_script_text.strip()[:40] if request.custom_script_text else "Video Project"
+    )
+
     db_job = create_job(
         db=db,
         job_id=job_id,
-        topic=request.topic,
+        topic=effective_topic,
         style=style_val,
         language=lang_val,
         mode=request.mode,
         art_style=request.art_style,
         voice_preset=request.voice_preset,
-        stage="pending"
+        stage=initial_stage
     )
 
-    # API chỉ tạo job (status 'pending'); worker bền
-    # `python -m dashboard.worker.runner` sẽ poll DB và thực thi (Task 4.1).
+    if parsed_script:
+        update_job_stage(db, job_id, stage=initial_stage, status=JobStatus.processing, pipeline_data=p_data)
+        update_job_output(db, job_id, script=parsed_script, meta={"title": effective_topic, "description": parsed_script.get("description", "")})
+        db_job = get_job(db, job_id)
+    else:
+        db_job.pipeline_data = p_data
+        db.commit()
+        db.refresh(db_job)
+
     return convert_db_to_response(db_job)
 
 @router.get("", response_model=List[JobResponse])
@@ -443,12 +503,17 @@ async def step_generate_script(
     from core.script_engine.script_generator import ScriptGenerator
     script_gen = ScriptGenerator()
 
+    preset_id = (request.script_style_id if request else None) or (db_job.pipeline_data or {}).get("script_style_id")
+    tone_inst = (request.custom_tone_instruction if request else None) or (db_job.pipeline_data or {}).get("custom_tone_instruction")
+
     try:
         script = await script_gen.generate(
             topic=topic,
             style=db_job.style or "collage_broll",
             language=db_job.language or "vi",
-            duration=duration
+            duration=duration,
+            script_style_id=preset_id,
+            custom_tone_instruction=tone_inst
         )
     except Exception as e_script:
         logger.warning(f"ScriptGenerator failed ({e_script}), using fallback script template")
@@ -1404,3 +1469,88 @@ def export_job_zip(job_id: str, db: Session = Depends(get_db)):
         media_type="application/zip",
         filename=f"project_{job_id}.zip"
     )
+
+@router.post("/{job_id}/initialize-script", response_model=JobResponse)
+async def initialize_job_script(
+    job_id: str,
+    request: StepInitializeScriptRequest,
+    db: Session = Depends(get_db)
+):
+    """
+    Initializes script for a pending/empty job.
+    Supports either:
+    1. AI Generation with selected script style preset and tone instruction.
+    2. Direct parsing of user-provided custom script text.
+    """
+    db_job = get_job(db, job_id)
+    if not db_job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    from core.script_engine.script_generator import ScriptGenerator
+    generator = ScriptGenerator()
+    style_val = db_job.style or "collage_broll"
+    lang_val = db_job.language or "vi"
+
+    if request.topic and request.topic.strip():
+        db_job.topic = request.topic.strip()
+
+    p_data = db_job.pipeline_data or {}
+
+    if request.script_mode == "custom_script" and request.custom_script_text and request.custom_script_text.strip():
+        effective_topic = db_job.topic or request.custom_script_text.strip()[:40]
+        script = generator.parse_custom_script_into_scenes(
+            raw_text=request.custom_script_text.strip(),
+            topic=effective_topic,
+            style=style_val,
+            language=lang_val
+        )
+    else:
+        preset_id = request.script_style_id or p_data.get("script_style_id")
+        tone_inst = request.custom_tone_instruction or p_data.get("custom_tone_instruction")
+        try:
+            script = await generator.generate(
+                topic=db_job.topic,
+                style=style_val,
+                language=lang_val,
+                duration=request.duration or 60,
+                script_style_id=preset_id,
+                custom_tone_instruction=tone_inst
+            )
+        except Exception as e_script:
+            logger.warning(f"ScriptGenerator fallback: {e_script}")
+            script = generator._generate_fallback_script(
+                topic=db_job.topic,
+                style=style_val,
+                language=lang_val,
+                duration=request.duration or 30
+            )
+
+    job_dir = Path("data/output") / job_id
+    job_dir.mkdir(parents=True, exist_ok=True)
+    with open(job_dir / "script.json", "w", encoding="utf-8") as f:
+        json.dump(script, f, ensure_ascii=False, indent=2)
+
+    p_data["script_origin"] = script.get("script_origin", "gemini")
+    p_data["script_style_id"] = request.script_style_id
+    p_data["custom_tone_instruction"] = request.custom_tone_instruction
+    p_data["script"] = script
+    raw_scenes = script.get("scenes", [])
+    scenes_list = []
+    for i, s in enumerate(raw_scenes):
+        sc = {
+            "scene_index": i,
+            "index": i,
+            "narration": s.get("narration") or s.get("voiceover") or "",
+            "visual_description": s.get("visual_description", ""),
+            "still_image_prompt": s.get("still_image_prompt", "") or s.get("image_prompt", "") or s.get("visual_description", "") or s.get("narration", ""),
+            "duration": float(s.get("duration", 4.0))
+        }
+        for k, v in s.items():
+            if k not in sc:
+                sc[k] = v
+        scenes_list.append(sc)
+    p_data["scenes"] = scenes_list
+
+    update_job_stage(db, job_id, stage="script_ready", status=JobStatus.processing, pipeline_data=p_data)
+    update_job_output(db, job_id, script=script, meta={"title": script.get("title", db_job.topic), "description": script.get("description", "")})
+    return convert_db_to_response(get_job(db, job_id))
