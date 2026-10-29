@@ -468,145 +468,145 @@ active_step = st.session_state["studio_active_step"]
 # -----------------------------------------------------------------------------
 if active_step == 0:
     st.subheader("📝 Giai Đoạn 1: Kịch Bản & Phân Cảnh (Script Stage)")
-    st.caption("Xem, chỉnh sửa trực tiếp lời thoại, mô tả hình ảnh, thời lượng cho từng cảnh, hoặc yêu cầu AI viết lại toàn bộ kịch bản.")
+    st.caption("Xem, chỉnh sửa trực tiếp lời thoại, mô tả hình ảnh, thời lượng cho từng cảnh, hoặc yêu cầu AI viết lại kịch bản.")
 
     script_data = pipeline_data.get("script") or job.get("script") or {}
     scenes = script_data.get("scenes") or pipeline_data.get("scenes") or []
     _origin = pipeline_data.get("script_origin")
     if _origin:
-        st.caption(f"Nguồn kịch bản: **{'Gemini AI' if _origin == 'gemini' else 'Template fallback (không dùng AI)'}**")
+        origin_label = "Gemini AI" if _origin == "gemini" else ("Kịch bản tự nhập của bạn" if _origin == "custom_script" else "Template fallback")
+        st.caption(f"Nguồn kịch bản: **{origin_label}**")
 
-    # AI Prompt Block
-    prompt_text = script_data.get("prompt_used") or script_data.get("prompt") or script_data.get("raw_prompt")
-    if prompt_text:
-        st.markdown("**AI Prompt Nguyên Văn (Gemini Engine):**")
-        st.code(prompt_text, language="markdown")
-
-    # Phong cách kịch bản AI
     all_st = get_all_script_styles()
     st_dict = {s["id"]: s for s in all_st}
-    col_st_sel, col_st_desc = st.columns([2, 1])
-    with col_st_sel:
-        quick_style = st.selectbox(
-            "🎭 Chọn Phong Cách Viết Kịch Bản Cho AI:",
-            options=list(st_dict.keys()),
-            format_func=lambda sid: st_dict[sid].get("name", sid),
-            key=f"quick_style_sel_{selected_job_id}"
-        )
-    with col_st_desc:
-        st.caption(f"🎯 *Khán giả:* {st_dict.get(quick_style, {}).get('target_audience', 'Mọi lứa tuổi')}")
 
-    # Action Buttons Bar
-    col_s1, col_s2, col_s3 = st.columns([1, 1, 1])
-
-    with col_s1:
-        btn_save_script = st.button(
-            "💾 Lưu Kịch Bản Đã Sửa",
-            type="primary",
-            use_container_width=True,
-            key=f"btn_save_script_{selected_job_id}"
-        )
-
-    with col_s2:
-        btn_regen_script = st.button(
-            "🔄 Viết Lại Kịch Bản Với AI",
-            use_container_width=True,
-            key=f"btn_regen_script_{selected_job_id}"
-        )
-
-    with col_s3:
-        btn_goto_voice = st.button(
-            "➡️ Chuyển Sang Bước 2: Tạo Âm Thanh",
-            use_container_width=True,
-            key=f"btn_goto_voice_{selected_job_id}"
-        )
-
-    # Action Handlers for Tab 1
-    if btn_save_script or btn_goto_voice:
-        updated_scenes = []
-        for idx in range(len(scenes)):
-            sc = scenes[idx]
-            sc_idx = sc.get("scene_index", sc.get("index", idx))
-            n_val = st.session_state.get(f"tab1_narr_{selected_job_id}_{idx}", sc.get("narration") or sc.get("text", ""))
-            v_val = st.session_state.get(f"tab1_vis_{selected_job_id}_{idx}", sc.get("visual_description") or sc.get("still_image_prompt", ""))
-            d_val = st.session_state.get(f"tab1_dur_{selected_job_id}_{idx}", safe_float(sc.get("duration"), 4.0))
-            merged_sc = dict(sc)
-            merged_sc.update({
-                "scene_index": int(sc_idx),
-                "index": int(sc_idx),
-                "narration": str(n_val).strip(),
-                "visual_description": str(v_val).strip(),
-                "still_image_prompt": str(v_val).strip(),
-                "duration": safe_float(d_val, 4.0),
-                "focal_keyword": str(st.session_state.get(f"tab1_focal_{selected_job_id}_{idx}", sc.get("focal_keyword", ""))).strip(),
-                "secondary_keyword": str(st.session_state.get(f"tab1_sec_{selected_job_id}_{idx}", sc.get("secondary_keyword", ""))).strip(),
-                "layout_type": st.session_state.get(f"tab1_layout_{selected_job_id}_{idx}", sc.get("layout_type", "hero_center")),
-                "has_hand": bool(st.session_state.get(f"tab1_hand_{selected_job_id}_{idx}", sc.get("has_hand", False))),
-                "has_camera": bool(st.session_state.get(f"tab1_cam_{selected_job_id}_{idx}", sc.get("has_camera", False))),
-            })
-            updated_scenes.append(merged_sc)
-
-        save_payload = {
-            "title": script_data.get("title", f"Video: {job.get('topic', selected_job_id)}"),
-            "description": script_data.get("description", ""),
-            "hashtags": script_data.get("hashtags", ["#shorts", "#viral", "#ai"]),
-            "scenes": updated_scenes
-        }
-
-        try:
-            r_put = api.put(
-                f"{API_URL}/jobs/{selected_job_id}/step/script",
-                json=save_payload,
-                timeout=15.0
-            )
-            if r_put.status_code == 200:
-                if btn_goto_voice:
-                    st.session_state["studio_active_step"] = 1
-                    st.rerun()
-                else:
-                    st.success("✅ Đã lưu kịch bản thành công!")
-                st.rerun()
-            else:
-                st.error(f"Lỗi khi lưu kịch bản: {r_put.text}")
-        except Exception as ex:
-            # Fallback to direct DB update if API call fails
-            try:
-                from dashboard.api.database import SessionLocal, get_job as db_get_job, update_job_stage
-                db = SessionLocal()
-                dj = db_get_job(db, selected_job_id)
-                if dj:
-                    p = dj.pipeline_data or {}
-                    p["script"] = save_payload
-                    p["scenes"] = updated_scenes
-                    update_job_stage(db, selected_job_id, stage="script_ready", pipeline_data=p)
-                    db.close()
-                    if btn_goto_voice:
-                        st.success("✅ Đã lưu kịch bản trực tiếp vào DB! Vui lòng chọn tab **🎙️ 2. Âm Thanh** ở phía trên.")
-                    else:
-                        st.success("✅ Đã lưu kịch bản trực tiếp vào DB!")
-                    st.rerun()
-            except Exception as ex_db:
-                st.error(f"Lỗi kết nối API: {ex} (Lỗi DB: {ex_db})")
-
-    if btn_regen_script:
-        with st.spinner("Đang yêu cầu Gemini AI viết lại kịch bản chuẩn cho chủ đề..."):
-            try:
-                preset_to_use = st.session_state.get(f"quick_style_sel_{selected_job_id}", "storytelling_mystery")
-                r_post = api.post(
-                    f"{API_URL}/jobs/{selected_job_id}/step/script",
-                    json={"topic": job.get("topic"), "art_style": art_style, "script_style_id": preset_to_use},
-                    timeout=30.0
-                )
-                if r_post.status_code == 200:
-                    st.success("🎉 Đã viết lại kịch bản mới thành công!")
-                    st.rerun()
-                else:
-                    st.error(f"Lỗi tạo kịch bản: {r_post.text}")
-            except Exception as ex:
-                st.error(f"Lỗi kết nối: {ex}")
-
-    # Editable Scene Cards
+    # =========================================================================
+    # TRƯỜNG HỢP 1: DỰ ÁN ĐÃ CÓ KỊCH BẢN (scenes tồn tại)
+    # =========================================================================
     if scenes:
+        prompt_text = script_data.get("prompt_used") or script_data.get("prompt") or script_data.get("raw_prompt")
+        if prompt_text:
+            with st.expander("📜 Xem Prompt AI Nguyên Văn Đã Dùng", expanded=False):
+                st.code(prompt_text, language="markdown")
+
+        # Thanh thao tác: Lưu kịch bản, Viết lại (kèm 1 dropdown phong cách duy nhất), Chuyển sang Bước 2
+        col_s1, col_s2, col_s3 = st.columns([1, 1.3, 1])
+
+        with col_s1:
+            btn_save_script = st.button(
+                "💾 Lưu Kịch Bản Đã Sửa",
+                type="primary",
+                use_container_width=True,
+                key=f"btn_save_script_{selected_job_id}"
+            )
+
+        with col_s2:
+            c_regen_sel, c_regen_btn = st.columns([1.2, 1])
+            with c_regen_sel:
+                regen_style = st.selectbox(
+                    "Đổi phong cách AI:",
+                    options=list(st_dict.keys()),
+                    format_func=lambda sid: st_dict[sid].get("name", sid),
+                    key=f"regen_style_{selected_job_id}",
+                    label_visibility="collapsed"
+                )
+            with c_regen_btn:
+                btn_regen_script = st.button(
+                    "🔄 Viết Lại Kịch Bản",
+                    use_container_width=True,
+                    key=f"btn_regen_script_{selected_job_id}"
+                )
+
+        with col_s3:
+            btn_goto_voice = st.button(
+                "➡️ Chuyển Sang Bước 2",
+                use_container_width=True,
+                key=f"btn_goto_voice_{selected_job_id}"
+            )
+
+        # Xử lý Lưu kịch bản & Chuyển sang Bước 2
+        if btn_save_script or btn_goto_voice:
+            updated_scenes = []
+            for idx in range(len(scenes)):
+                sc = scenes[idx]
+                sc_idx = sc.get("scene_index", sc.get("index", idx))
+                n_val = st.session_state.get(f"tab1_narr_{selected_job_id}_{idx}", sc.get("narration") or sc.get("text", ""))
+                v_val = st.session_state.get(f"tab1_vis_{selected_job_id}_{idx}", sc.get("visual_description") or sc.get("still_image_prompt", ""))
+                d_val = st.session_state.get(f"tab1_dur_{selected_job_id}_{idx}", safe_float(sc.get("duration"), 4.0))
+                merged_sc = dict(sc)
+                merged_sc.update({
+                    "scene_index": int(sc_idx),
+                    "index": int(sc_idx),
+                    "narration": str(n_val).strip(),
+                    "visual_description": str(v_val).strip(),
+                    "still_image_prompt": str(v_val).strip(),
+                    "duration": safe_float(d_val, 4.0),
+                    "focal_keyword": str(st.session_state.get(f"tab1_focal_{selected_job_id}_{idx}", sc.get("focal_keyword", ""))).strip(),
+                    "secondary_keyword": str(st.session_state.get(f"tab1_sec_{selected_job_id}_{idx}", sc.get("secondary_keyword", ""))).strip(),
+                    "layout_type": st.session_state.get(f"tab1_layout_{selected_job_id}_{idx}", sc.get("layout_type", "hero_center")),
+                    "has_hand": bool(st.session_state.get(f"tab1_hand_{selected_job_id}_{idx}", sc.get("has_hand", False))),
+                    "has_camera": bool(st.session_state.get(f"tab1_cam_{selected_job_id}_{idx}", sc.get("has_camera", False))),
+                })
+                updated_scenes.append(merged_sc)
+
+            save_payload = {
+                "title": script_data.get("title", f"Video: {job.get('topic', selected_job_id)}"),
+                "description": script_data.get("description", ""),
+                "hashtags": script_data.get("hashtags", ["#shorts", "#viral", "#ai"]),
+                "scenes": updated_scenes
+            }
+
+            try:
+                r_put = api.put(
+                    f"{API_URL}/jobs/{selected_job_id}/step/script",
+                    json=save_payload,
+                    timeout=15.0
+                )
+                if r_put.status_code == 200:
+                    if btn_goto_voice:
+                        st.session_state["studio_active_step"] = 1
+                    else:
+                        st.success("✅ Đã lưu kịch bản thành công!")
+                    st.rerun()
+                else:
+                    st.error(f"Lỗi khi lưu kịch bản: {r_put.text}")
+            except Exception as ex:
+                try:
+                    from dashboard.api.database import SessionLocal, get_job as db_get_job, update_job_stage
+                    db = SessionLocal()
+                    dj = db_get_job(db, selected_job_id)
+                    if dj:
+                        p = dj.pipeline_data or {}
+                        p["script"] = save_payload
+                        p["scenes"] = updated_scenes
+                        update_job_stage(db, selected_job_id, stage="script_ready", pipeline_data=p)
+                        db.close()
+                        if btn_goto_voice:
+                            st.session_state["studio_active_step"] = 1
+                        else:
+                            st.success("✅ Đã lưu kịch bản trực tiếp vào DB!")
+                        st.rerun()
+                except Exception as ex_db:
+                    st.error(f"Lỗi kết nối API: {ex} (Lỗi DB: {ex_db})")
+
+        # Xử lý Viết Lại Kịch Bản Với AI
+        if btn_regen_script:
+            with st.spinner("Đang yêu cầu AI viết lại kịch bản chuẩn cho chủ đề..."):
+                try:
+                    r_post = api.post(
+                        f"{API_URL}/jobs/{selected_job_id}/step/script",
+                        json={"topic": job.get("topic"), "art_style": art_style, "script_style_id": regen_style},
+                        timeout=60.0
+                    )
+                    if r_post.status_code == 200:
+                        st.success("🎉 Đã viết lại kịch bản mới thành công!")
+                        st.rerun()
+                    else:
+                        st.error(f"Lỗi tạo kịch bản: {r_post.text}")
+                except Exception as ex:
+                    st.error(f"Lỗi kết nối: {ex}")
+
+        # Danh sách thẻ phân cảnh có thể chỉnh sửa
         st.markdown(f"**Danh Sách Thẻ Phân Cảnh Có Thể Chỉnh Sửa ({len(scenes)} Cảnh):**")
         for idx, sc in enumerate(scenes):
             sc_num = idx + 1
@@ -672,8 +672,12 @@ if active_step == 0:
                     _pub = f" — {_s['publisher']}" if _s.get("publisher") else ""
                     st.markdown(f"- [{_label}]({_s['url']}){_pub}")
             st.markdown("<hr style='margin:10px 0; border:none; border-top:1px solid #333;'>", unsafe_allow_html=True)
+
+    # =========================================================================
+    # TRƯỜNG HỢP 2: DỰ ÁN CHƯA CÓ KỊCH BẢN (not scenes) -> CHỈ HIỂN THỊ KHUNG KHỞI TẠO
+    # =========================================================================
     else:
-        st.warning("⚠️ **Dự án chưa có kịch bản hoặc phân cảnh.** Bạn có toàn quyền chủ động chọn 1 trong các cách dưới đây:")
+        st.warning("⚠️ **Dự án chưa có kịch bản hoặc phân cảnh.** Bạn hãy chọn 1 trong các cách dưới đây để bắt đầu:")
 
         hub_tab_ai, hub_tab_custom, hub_tab_auto = st.tabs([
             "🤖 Cách 1: AI Tự Động Viết Theo Phong Cách",
@@ -687,17 +691,19 @@ if active_step == 0:
             with col_ai1:
                 topic_ai = st.text_input("Chủ đề kịch bản:", value=job.get("topic", ""), key=f"hub_topic_{selected_job_id}")
                 hub_style_sel = st.selectbox(
-                    "Phong cách kịch bản:",
+                    "🎭 Phong cách viết kịch bản AI (Chọn 1 phong cách):",
                     options=list(st_dict.keys()),
                     format_func=lambda sid: st_dict[sid].get("name", sid),
                     key=f"hub_style_sel_{selected_job_id}"
                 )
+                st.caption(f"🎯 *Mô tả phong cách:* {st_dict.get(hub_style_sel, {}).get('description', '')}")
             with col_ai2:
                 dur_ai = st.selectbox("Thời lượng dự kiến:", options=[30, 60, 90], index=1, format_func=lambda d: f"{d} giây", key=f"hub_dur_{selected_job_id}")
                 st.write("")
                 st.write("")
                 if st.button("🚀 AI Viết Kịch Bản Ngay", type="primary", use_container_width=True, key=f"hub_btn_ai_{selected_job_id}"):
-                    with st.spinner("AI đang tạo kịch bản..."):
+                    with st.spinner("AI đang tạo kịch bản (có thể mất 15-30 giây)..."):
+                        success = False
                         try:
                             payload = {
                                 "script_mode": "ai_generate",
@@ -705,14 +711,29 @@ if active_step == 0:
                                 "script_style_id": hub_style_sel,
                                 "duration": dur_ai
                             }
-                            r_init = api.post(f"{API_URL}/jobs/{selected_job_id}/initialize-script", json=payload, timeout=30.0)
+                            # Thử gọi /initialize-script trước
+                            r_init = api.post(f"{API_URL}/jobs/{selected_job_id}/initialize-script", json=payload, timeout=60.0)
                             if r_init.status_code == 200:
-                                st.success("🎉 Đã tạo kịch bản thành công!")
-                                st.rerun()
+                                success = True
+                            elif r_init.status_code == 404:
+                                # Fallback sang /step/script nếu API cũ chưa kịp reload route mới
+                                r_step = api.post(
+                                    f"{API_URL}/jobs/{selected_job_id}/step/script",
+                                    json={"topic": topic_ai.strip() or job.get("topic"), "art_style": art_style, "script_style_id": hub_style_sel, "duration": dur_ai},
+                                    timeout=60.0
+                                )
+                                if r_step.status_code == 200:
+                                    success = True
+                                else:
+                                    st.error(f"Lỗi tạo kịch bản: {r_step.text}")
                             else:
                                 st.error(f"Lỗi tạo kịch bản: {r_init.text}")
                         except Exception as e_init:
                             st.error(f"Lỗi kết nối: {e_init}")
+
+                        if success:
+                            st.success("🎉 Đã tạo kịch bản thành công!")
+                            st.rerun()
 
         with hub_tab_custom:
             st.markdown("Dán kịch bản hoặc lời thoại của bạn vào đây (AI sẽ giữ nguyên 100% câu từ, không tự ý sửa đổi):")
@@ -733,35 +754,36 @@ if active_step == 0:
                         st.error("Vui lòng dán nội dung kịch bản!")
                     else:
                         with st.spinner("Đang tách phân cảnh và tạo prompt hình ảnh..."):
+                            success = False
                             try:
                                 payload = {
                                     "script_mode": "custom_script",
                                     "custom_script_text": custom_txt.strip(),
                                     "topic": custom_topic.strip() or custom_txt.strip()[:40]
                                 }
-                                r_init = api.post(f"{API_URL}/jobs/{selected_job_id}/initialize-script", json=payload, timeout=15.0)
+                                r_init = api.post(f"{API_URL}/jobs/{selected_job_id}/initialize-script", json=payload, timeout=30.0)
                                 if r_init.status_code == 200:
-                                    st.success("🎉 Đã nạp kịch bản thành công! Các phân cảnh đã sẵn sàng để bạn duyệt.")
-                                    st.rerun()
+                                    success = True
                                 else:
                                     st.error(f"Lỗi nạp kịch bản: {r_init.text}")
                             except Exception as e_init:
                                 st.error(f"Lỗi kết nối: {e_init}")
+
+                            if success:
+                                st.success("🎉 Đã nạp kịch bản thành công! Các phân cảnh đã sẵn sàng để bạn duyệt.")
+                                st.rerun()
 
         with hub_tab_auto:
             st.markdown("Nếu bạn muốn hệ thống tự động chạy toàn bộ quy trình từ A đến Z mà không cần duyệt từng bước:")
             if st.button("⚡ Chuyển Sang Tự Động & Chạy Ngay", type="primary", key=f"hub_btn_auto_{selected_job_id}"):
                 with st.spinner("Đang kích hoạt quy trình tự động..."):
                     try:
-                        r_init = api.post(f"{API_URL}/jobs/{selected_job_id}/continue-render", json={}, timeout=10.0)
+                        r_init = api.post(f"{API_URL}/jobs/{selected_job_id}/continue-render", json={}, timeout=15.0)
                         st.success("Đã kích hoạt chế độ tự động! Bạn có thể theo dõi tiến trình trực tiếp bên trên.")
                         st.rerun()
                     except Exception as e_auto:
                         st.error(f"Lỗi kích hoạt: {e_auto}")
 
-# -----------------------------------------------------------------------------
-# TAB 2: 🎙️ Âm Thanh (Voice Stage)
-# -----------------------------------------------------------------------------
 elif active_step == 1:
     st.subheader("🎙️ Giai Đoạn 2: Âm Thanh & Giọng Đọc (Voice Stage)")
     st.caption("Khởi tạo giọng đọc VieNeu-TTS cho toàn bộ kịch bản, nghe thử từng cảnh, sửa lời thoại và sinh lại âm thanh độc lập.")

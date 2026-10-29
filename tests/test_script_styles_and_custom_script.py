@@ -180,3 +180,36 @@ def test_api_initialize_script_endpoint(client):
     assert data_init["stage"] == "script_ready"
     assert data_init["pipeline_data"]["script_origin"] == "custom_script"
     assert len(data_init["pipeline_data"]["scenes"]) >= 1
+
+
+def test_initialize_script_with_bill_bryson_style(client):
+    # Create job in step_by_step mode
+    payload = {
+        "topic": "Sự thật thú vị về bộ não",
+        "style": "collage_broll",
+        "language": "vi",
+        "format": "shorts",
+        "mode": "step_by_step"
+    }
+    res = client.post("/jobs", json=payload)
+    assert res.status_code == 200
+    job_id = res.json()["id"]
+
+    # Call initialize-script with bill_bryson style
+    init_payload = {
+        "script_mode": "ai_generate",
+        "topic": "Sự thật thú vị về bộ não",
+        "script_style_id": "bill_bryson",
+        "duration": 60
+    }
+    res_init = client.post(f"/jobs/{job_id}/initialize-script", json=init_payload)
+    assert res_init.status_code == 200
+    data = res_init.json()
+    assert data["stage"] == "script_ready"
+    assert len(data["pipeline_data"]["scenes"]) >= 1
+
+
+def test_is_autovideofactory_api_logic():
+    from launch_studio import is_autovideofactory_api
+    # If a port is not running or doesn't have openapi, returns False
+    assert is_autovideofactory_api(59999) is False

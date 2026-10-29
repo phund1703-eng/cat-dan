@@ -49,7 +49,7 @@ def is_port_available(port: int, host: str = "127.0.0.1") -> bool:
 
 
 def is_autovideofactory_api(port: int) -> bool:
-    """Kiểm tra cổng đã chạy đúng AutoVideoFactory API chưa."""
+    """Kiểm tra cổng đã chạy đúng AutoVideoFactory API bản mới nhất (có đủ route) chưa."""
     try:
         req = urllib.request.Request(
             f"http://127.0.0.1:{port}/openapi.json",
@@ -57,7 +57,24 @@ def is_autovideofactory_api(port: int) -> bool:
         )
         with urllib.request.urlopen(req, timeout=1.5) as resp:
             data = json.loads(resp.read().decode("utf-8"))
-            return "AutoVideoFactory" in data.get("info", {}).get("title", "")
+            if "AutoVideoFactory" not in data.get("info", {}).get("title", ""):
+                return False
+            paths = data.get("paths", {})
+            return "/jobs/{job_id}/initialize-script" in paths and "/script-styles" in paths
+    except Exception:
+        return False
+
+
+def kill_process_on_port(port: int) -> bool:
+    """Tắt tiến trình cũ đang chiếm port để giải phóng cổng."""
+    try:
+        cmd = f'powershell -NoProfile -Command "(Get-NetTCPConnection -LocalPort {port} -ErrorAction SilentlyContinue).OwningProcess"'
+        out = subprocess.check_output(cmd, shell=True).decode().strip()
+        pids = [int(p) for p in out.split() if p.isdigit() and int(p) > 0]
+        for pid in set(pids):
+            subprocess.run(f"taskkill /F /PID {pid}", shell=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(0.5)
+        return True
     except Exception:
         return False
 
@@ -157,14 +174,19 @@ def main():
     if is_autovideofactory_api(8000):
         api_port = 8000
         api_already_running = True
-        print("ℹ️ Phát hiện AutoVideoFactory API đã chạy sẵn trên cổng 8000.")
-    elif is_port_available(8000):
-        api_port = 8000
+        print("ℹ️ Phát hiện AutoVideoFactory API bản mới nhất đã sẵn sàng trên cổng 8000.")
     else:
-        # Cổng 8000 đang bị phần mềm khác chiếm
-        api_port = find_free_port(8008)
-        print(f"⚠️ Cổng 8000 đang bận (do ứng dụng khác sử dụng).")
-        print(f"➡️ Tự động điều hướng API Backend sang cổng khả dụng: {api_port}")
+        # Nếu port 8000 đang bị chiếm bởi API bản cũ hoặc tiến trình khác, làm mới để đảm bảo nạp code mới
+        if not is_port_available(8000):
+            print("🔄 Đang làm mới tiến trình cũ trên cổng 8000 để nạp bản cập nhật...")
+            kill_process_on_port(8000)
+            time.sleep(1)
+
+        if is_port_available(8000):
+            api_port = 8000
+        else:
+            api_port = find_free_port(8008)
+            print(f"⚠️ Cổng 8000 đang bận. Điều hướng API Backend sang cổng: {api_port}")
 
     # Streamlit UI: Ưu tiên 8501
     ui_port = 8501 if is_port_available(8501) else find_free_port(8502)
@@ -206,6 +228,7 @@ def main():
                 "0.0.0.0",
                 "--port",
                 str(api_port),
+                "--reload",
             ],
             cwd=str(PROJECT_ROOT),
             env=env,

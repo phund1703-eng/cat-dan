@@ -109,10 +109,13 @@ class GeminiClient:
             for attempt in range(max_attempts):
                 try:
                     gen_model = genai.GenerativeModel(model_name=candidate_model)
-                    response = await asyncio.to_thread(
-                        gen_model.generate_content,
-                        prompt,
-                        generation_config=generation_config
+                    response = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            gen_model.generate_content,
+                            prompt,
+                            generation_config=generation_config
+                        ),
+                        timeout=50.0
                     )
                     return response.text
                 except Exception as e:
@@ -155,10 +158,13 @@ class GeminiClient:
             for attempt in range(max_attempts):
                 try:
                     gen_model = genai.GenerativeModel(model_name=candidate_model)
-                    response = await asyncio.to_thread(
-                        gen_model.generate_content,
-                        prompt,
-                        generation_config=generation_config
+                    response = await asyncio.wait_for(
+                        asyncio.to_thread(
+                            gen_model.generate_content,
+                            prompt,
+                            generation_config=generation_config
+                        ),
+                        timeout=50.0
                     )
                     
                     try:

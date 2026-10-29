@@ -28,7 +28,12 @@ class PromptTemplates:
         style_desc = PromptTemplates.VIDEO_STYLES.get(style, "Standard engaging video style.")
         collage_rule_vi = ""
         collage_rule_en = ""
-        tone_section = f"\nYÊU CẦU ĐẶC BIỆT VỀ PHONG CÁCH VÀ GIỌNG ĐIỆU HÀNH VĂN (TONE OF VOICE):\n{tone_instruction.strip()}\n- Hãy đảm bảo toàn bộ lời thoại (narration) của các cảnh thể hiện triệt để phong cách này!\n" if tone_instruction and tone_instruction.strip() else ""
+        tone_section = (
+            f"\nYÊU CẦU ĐẶC BIỆT VỀ PHONG CÁCH VÀ GIỌNG ĐIỆU HÀNH VĂN (TONE OF VOICE):\n{tone_instruction.strip()}\n"
+            f"- LƯU Ý BẮT BUỘC: Toàn bộ phong cách trên áp dụng vào lời thoại (narration/voiceover) của từng cảnh. "
+            f"Đầu ra của bạn PHẢI LUÔN LÀ DUY NHẤT 1 ĐỐI TƯỢNG JSON HỢP LỆ theo đúng schema quy định bên dưới, "
+            f"không được xuất văn bản tự do, không chia câu trả lời thành các phần text bên ngoài JSON!\n"
+        ) if tone_instruction and tone_instruction.strip() else ""
         if style == "collage_broll":
             if language == 'vi':
                 return f"""Bạn là một biên kịch và giám đốc nghệ thuật video chuyên nghiệp theo phong cách editorial paper-collage stop-motion chuẩn repo gbro-collage-broll.
