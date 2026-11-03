@@ -35,7 +35,7 @@ SETTINGS_PATH_ENV = "CATDAN_SETTINGS_FILE"
 
 #: Fallback cuối cùng khi settings.yaml thiếu llm.model — phải khớp
 #: llm.model trong config/settings.yaml (test_gemini_client_empirical kiểm).
-DEFAULT_GEMINI_MODEL = "gemini-3.8-flash"
+DEFAULT_GEMINI_MODEL = "gemini-3-flash-preview"
 
 
 def settings_path() -> Path:

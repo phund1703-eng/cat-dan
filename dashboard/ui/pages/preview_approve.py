@@ -1,7 +1,14 @@
-from core.script_engine.script_style_presets import get_all_script_styles
+from core.script_engine.script_style_presets import (
+    get_all_script_styles,
+    save_script_style,
+    get_script_style_by_id
+)
 """
-Studio Tương Tác 5 Bước & Phê Duyệt Video (Requirement R3)
+Studio Tương Tác 5 Bước & Phòng Thu Sản Xuất Video (Requirement R3)
 dashboard/ui/pages/preview_approve.py
+Gom gọn Bước 1 (Tạo Dự Án) và Bước 2 (Phòng Thu) vào 1 trang duy nhất:
+- Cho phép tạo dự án mới trực tiếp (Chế độ Tự động hoặc Chạy theo 5 bước).
+- Phòng thu tương tác 5 bước: Kịch bản -> Âm thanh -> Storyboard -> Hiệu ứng -> Master Video.
 """
 import os
 import io
@@ -17,8 +24,7 @@ import pandas as pd
 API_URL = os.getenv("API_URL", "http://localhost:8000")
 
 
-# Task 5.4: session gọi API tự gắn X-API-Key (lấy từ SECRET_KEY trong env)
-# cho các request GHI; khi SECRET_KEY chưa đặt thì không gắn gì (API mở).
+# Session gọi API tự gắn X-API-Key cho các request GHI
 class _ApiSession(requests.Session):
     """requests.Session tự đính kèm X-API-Key cho POST/PUT/PATCH/DELETE."""
 
@@ -65,7 +71,6 @@ def get_media_url_or_path(file_path: str) -> str:
 
 def get_or_create_project_zip(job_id: str) -> Optional[bytes]:
     """Tải file zip từ API hoặc tự tạo từ thư mục data/output/{job_id}."""
-    # 1. Thử gọi API GET /jobs/{job_id}/export-zip
     try:
         r = requests.get(f"{API_URL}/jobs/{job_id}/export-zip", timeout=5.0)
         if r.status_code == 200 and r.content:
@@ -73,7 +78,6 @@ def get_or_create_project_zip(job_id: str) -> Optional[bytes]:
     except Exception:
         pass
 
-    # 2. Thử đọc file zip đã sinh sẵn trên đĩa
     zip_path = Path("data/output") / f"{job_id}.zip"
     if zip_path.exists():
         try:
@@ -81,7 +85,6 @@ def get_or_create_project_zip(job_id: str) -> Optional[bytes]:
         except Exception:
             pass
 
-    # 3. Fallback: Đóng gói trực tiếp thư mục data/output/{job_id}
     job_dir = Path("data/output") / job_id
     if job_dir.exists():
         try:
@@ -104,12 +107,48 @@ def get_or_create_project_zip(job_id: str) -> Optional[bytes]:
     return None
 
 
+def fetch_voice_presets() -> List[str]:
+    """Lấy danh sách mẫu giọng đọc từ API hoặc fallback đĩa cứng."""
+    try:
+        r = requests.get(f"{API_URL}/voices", timeout=2.0)
+        if r.status_code == 200:
+            voices = r.json().get("voices", [])
+            if voices:
+                return voices
+    except Exception:
+        pass
+
+    local_dir = Path("assets/voices")
+    if local_dir.exists():
+        files = [f.name for f in local_dir.glob("*.wav")] + [f.name for f in local_dir.glob("*.mp3")]
+        if files:
+            res = ["default"]
+            for f in sorted(files):
+                if f not in res:
+                    res.append(f)
+            return res
+
+    return ["default", "Minh Quân (Nam)", "Mai Phương (Nữ)"]
+
+
+def fetch_script_style_presets() -> List[Dict[str, Any]]:
+    """Lấy danh sách mẫu phong cách kịch bản từ API hoặc fallback file cục bộ."""
+    try:
+        r = requests.get(f"{API_URL}/script-styles", timeout=2.0)
+        if r.status_code == 200:
+            styles = r.json()
+            if styles:
+                return styles
+    except Exception:
+        pass
+    return get_all_script_styles()
+
+
 def load_all_jobs() -> List[Dict[str, Any]]:
     """Tải tất cả các job từ API, hoặc fallback từ SQLite Database, hoặc quét data/output."""
     jobs: List[Dict[str, Any]] = []
-    # 1. API query
     try:
-        res = requests.get(f"{API_URL}/jobs", timeout=2.0)
+        res = requests.get(f"{API_URL}/jobs", timeout=2.5)
         if res.status_code == 200:
             data = res.json()
             if isinstance(data, list) and data:
@@ -117,7 +156,6 @@ def load_all_jobs() -> List[Dict[str, Any]]:
     except Exception:
         pass
 
-    # 2. SQLite direct read fallback
     try:
         from dashboard.api.database import SessionLocal, list_jobs
         db = SessionLocal()
@@ -145,7 +183,6 @@ def load_all_jobs() -> List[Dict[str, Any]]:
     except Exception:
         pass
 
-    # 3. Quét data/output cho các job đã chạy
     output_dir = Path("data/output")
     if output_dir.exists():
         for job_folder in output_dir.iterdir():
@@ -174,7 +211,7 @@ def load_all_jobs() -> List[Dict[str, Any]]:
 def get_job_details(job_id: str) -> Optional[Dict[str, Any]]:
     """Lấy chi tiết dự án từ API hoặc trực tiếp từ SQLite."""
     try:
-        r = requests.get(f"{API_URL}/jobs/{job_id}", timeout=2.0)
+        r = requests.get(f"{API_URL}/jobs/{job_id}", timeout=2.5)
         if r.status_code == 200:
             return r.json()
     except Exception:
@@ -213,38 +250,357 @@ def get_job_details(job_id: str) -> Optional[Dict[str, Any]]:
 # =============================================================================
 
 all_jobs = load_all_jobs()
+job_ids = [j["id"] for j in all_jobs]
 
-if not all_jobs:
-    st.title("🎬 Studio Tương Tác 5 Bước & Phê Duyệt Video")
-    st.info("ℹ️ Hiện chưa có dự án nào trong hệ thống. Vui lòng tạo dự án mới tại menu **Tạo Video Mới**.")
+# State flag để mở/đóng form tạo dự án mới
+if "show_create_project_modal" not in st.session_state:
+    st.session_state["show_create_project_modal"] = (len(all_jobs) == 0)
+
+# =============================================================================
+# Header & Project Selector Bar
+# =============================================================================
+
+st.title("🎬 Phòng Thu & Sản Xuất Video")
+
+c_job_sel, c_btn_new, c_job_zip = st.columns([3, 1.2, 1.2])
+
+selected_job_id = None
+if job_ids:
+    default_index = 0
+    if "selected_job_id" in st.session_state and st.session_state["selected_job_id"] in job_ids:
+        default_index = job_ids.index(st.session_state["selected_job_id"])
+
+    with c_job_sel:
+        selected_job_id = st.selectbox(
+            "🎯 Chọn Dự Án Video Để Làm Việc:",
+            options=job_ids,
+            index=default_index,
+            format_func=lambda jid: next((
+                f"[{j.get('stage', 'pending').upper()}] {j.get('topic', jid)} ({jid[:8]}...) - {'🛠️ Step-by-Step' if j.get('mode') == 'step_by_step' else '⚡ Auto'}"
+                for j in all_jobs if j["id"] == jid
+            ), jid)
+        )
+        st.session_state["selected_job_id"] = selected_job_id
+
+with c_btn_new:
+    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+    is_modal_open = st.session_state.get("show_create_project_modal", False)
+    btn_label = "✖️ Đóng Form Tạo" if is_modal_open and len(all_jobs) > 0 else "➕ Tạo Dự Án Mới"
+    if st.button(btn_label, use_container_width=True, type="secondary" if is_modal_open else "primary"):
+        st.session_state["show_create_project_modal"] = not is_modal_open
+        st.rerun()
+
+with c_job_zip:
+    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
+    if selected_job_id:
+        zip_bytes = get_or_create_project_zip(selected_job_id)
+        if zip_bytes:
+            st.download_button(
+                label="📦 Tải ZIP Dự Án",
+                data=zip_bytes,
+                file_name=f"project_{selected_job_id}.zip",
+                mime="application/zip",
+                use_container_width=True,
+                key=f"header_dl_zip_{selected_job_id}"
+            )
+        else:
+            st.button("📦 Tải ZIP Dự Án", disabled=True, use_container_width=True, help="Dự án chưa có file ZIP.")
+    else:
+        st.button("📦 Tải ZIP Dự Án", disabled=True, use_container_width=True)
+
+
+# =============================================================================
+# KHUNG KHỞI TẠO DỰ ÁN VIDEO MỚI (TÍCH HỢP BƯỚC 1 & BƯỚC 2)
+# =============================================================================
+if st.session_state.get("show_create_project_modal", False) or not all_jobs:
+    with st.container(border=True):
+        st.markdown("### ➕ Khởi Tạo Dự Án Video Mới")
+        st.caption("Nhập chủ đề hoặc dán kịch bản sẵn có, chọn phong cách và quyết định chạy Tự Động hoặc Kiểm Duyệt 5 Bước:")
+
+        # 1. Quản lý giọng đọc VieNeu-TTS (Expander)
+        with st.expander("🎙️ Quản Lý Mẫu Giọng Đọc & Clone Giọng (VieNeu-TTS)", expanded=False):
+            col_vp1, col_vp2 = st.columns([2, 1])
+            with col_vp1:
+                test_voice = st.selectbox("Chọn mẫu giọng để nghe thử:", options=fetch_voice_presets(), key="unified_preview_voice_select")
+            with col_vp2:
+                st.write("")
+                st.write("")
+                if st.button("🔊 Nghe thử giọng này", key="unified_btn_preview_audio", use_container_width=True):
+                    with st.spinner("Đang tạo âm thanh mẫu..."):
+                        try:
+                            r_prev = requests.get(f"{API_URL}/voices/preview", params={"voice": test_voice}, timeout=15.0)
+                            if r_prev.status_code == 200:
+                                st.audio(r_prev.content, format="audio/wav")
+                                st.success(f"Đang phát mẫu giọng: **{test_voice}**")
+                            else:
+                                st.error(f"Không thể tạo âm thanh mẫu: {r_prev.text}")
+                        except Exception as e_prev:
+                            st.error(f"Lỗi kết nối khi nghe thử giọng: {e_prev}")
+
+            st.divider()
+            st.markdown("**Clone giọng đọc riêng từ file mẫu (3–10 giây):**")
+            st.caption("💡 VieNeu-TTS v3 Turbo trích xuất âm sắc trực tiếp từ sóng âm (waveform). Bạn không cần gõ chữ đã nói.")
+            col_up1, col_up2 = st.columns([2, 1])
+            with col_up1:
+                voice_file = st.file_uploader("Chọn file giọng mẫu (.wav, .mp3)", type=["wav", "mp3"], key="unified_voice_uploader")
+                friendly_voice_name = st.text_input("Tên gợi nhớ cho giọng này:", placeholder="Ví dụ: Giọng Thầy Giáo, Giọng Kể Chuyện Đêm...", key="unified_friendly_name")
+            with col_up2:
+                st.write("")
+                st.write("")
+                if voice_file and st.button("📤 Tải lên & Lưu Giọng", key="unified_upload_voice_btn", use_container_width=True):
+                    try:
+                        fname = voice_file.name
+                        if friendly_voice_name.strip():
+                            ext = Path(fname).suffix or ".wav"
+                            fname = f"{friendly_voice_name.strip()}{ext}"
+                        files = {"file": (fname, voice_file.getvalue(), voice_file.type or "audio/wav")}
+                        res_up = api.post(f"{API_URL}/voices/upload", files=files, timeout=10.0)
+                        if res_up.status_code in [200, 201]:
+                            st.success(f"Đã lưu mẫu giọng: `{fname}`")
+                            st.rerun()
+                        else:
+                            st.error(f"Lỗi tải lên: {res_up.text}")
+                    except Exception as e_up:
+                        st.error(f"Lỗi tải giọng: {e_up}")
+
+        # 2. Lựa chọn phương thức kịch bản
+        st.markdown("#### ✍️ 1. Nội Dung Kịch Bản")
+        new_script_mode = st.radio(
+            "Chọn cách thức tạo kịch bản:",
+            options=["ai_generate", "custom_script"],
+            format_func=lambda x: {
+                "ai_generate": "🤖 Nhập Chủ Đề (AI Tự Động Viết Kịch Bản)",
+                "custom_script": "📝 Tự Nhập Kịch Bản / Lời Thoại Sẵn Có (Giữ Nguyên 100% Lời Thoại)"
+            }.get(x, x),
+            horizontal=True,
+            key="unified_script_mode"
+        )
+
+        all_style_presets = fetch_script_style_presets()
+        style_preset_dict = {s["id"]: s for s in all_style_presets}
+
+        new_topic = ""
+        new_custom_script = ""
+        new_style_id = "storytelling_mystery"
+        new_tone_instruction = ""
+        new_duration = 60
+
+        if new_script_mode == "ai_generate":
+            new_topic = st.text_area(
+                "📌 Chủ đề video muốn AI sáng tác:",
+                placeholder="Ví dụ: Sự thật bí mật về bộ não của con người...",
+                height=80,
+                key="unified_topic_input"
+            )
+            col_ns1, col_ns2 = st.columns([2, 1])
+            with col_ns1:
+                new_style_id = st.selectbox(
+                    "🎭 Phong cách viết kịch bản AI (Chỉ chọn 1 phong cách):",
+                    options=list(style_preset_dict.keys()),
+                    format_func=lambda sid: style_preset_dict[sid].get("name", sid),
+                    key="unified_style_id_select"
+                )
+                cur_style = style_preset_dict.get(new_style_id, {})
+                st.caption(f"🎯 *Mô tả phong cách:* {cur_style.get('description', '')}")
+            with col_ns2:
+                new_duration = st.selectbox(
+                    "⏱️ Thời lượng dự kiến:",
+                    options=[30, 60, 90],
+                    index=1,
+                    format_func=lambda d: f"{d} giây",
+                    key="unified_duration_select"
+                )
+
+            # Expander tinh chỉnh prompt & lưu mẫu phong cách riêng
+            with st.expander("⚙️ Tinh chỉnh Prompt & Lưu Thành Mẫu Phong Cách Mới", expanded=False):
+                prompt_edit = st.text_area(
+                    "Nội dung Prompt chỉ đạo giọng điệu (Tone Instruction):",
+                    value=cur_style.get("tone_instruction", ""),
+                    height=100,
+                    key="unified_tone_edit"
+                )
+                new_tone_instruction = prompt_edit
+                c_sp1, c_sp2, c_sp3 = st.columns([2, 2, 1])
+                with c_sp1:
+                    save_name = st.text_input("Tên phong cách mới:", placeholder="Ví dụ: Giọng Hùng Biện Truyền Cảm Hứng...", key="unified_save_name")
+                with c_sp2:
+                    save_desc = st.text_input("Mô tả ngắn:", placeholder="Ví dụ: Dứt khoát, thuyết phục...", key="unified_save_desc")
+                with c_sp3:
+                    st.write("")
+                    st.write("")
+                    if st.button("💾 Lưu Mẫu Này", key="unified_save_preset_btn", use_container_width=True):
+                        if not save_name.strip():
+                            st.error("Vui lòng nhập tên phong cách!")
+                        elif not prompt_edit.strip():
+                            st.error("Nội dung chỉ đạo phong cách không được để trống!")
+                        else:
+                            try:
+                                save_payload = {
+                                    "name": save_name.strip(),
+                                    "description": save_desc.strip(),
+                                    "tone_instruction": prompt_edit.strip(),
+                                    "target_audience": "Khán giả tuỳ chỉnh"
+                                }
+                                res_sp = api.post(f"{API_URL}/script-styles", json=save_payload, timeout=5.0)
+                                if res_sp.status_code in [200, 201]:
+                                    st.success(f"Đã lưu thành công phong cách: **{save_name}**!")
+                                    st.rerun()
+                                else:
+                                    save_script_style(
+                                        style_id=save_name.strip(),
+                                        name=save_name.strip(),
+                                        description=save_desc.strip(),
+                                        tone_instruction=prompt_edit.strip()
+                                    )
+                                    st.success(f"Đã lưu thành công phong cách: **{save_name}**!")
+                                    st.rerun()
+                            except Exception as ex_sp:
+                                st.error(f"Lỗi khi lưu phong cách: {ex_sp}")
+        else:
+            new_topic = st.text_input("📌 Tiêu đề / Tên chủ đề video (tuỳ chọn):", placeholder="Ví dụ: Bí ẩn cấu tạo bộ não con người", key="unified_custom_topic")
+            new_custom_script = st.text_area(
+                "📝 Dán toàn bộ kịch bản / lời thoại có sẵn vào đây:",
+                placeholder="Dán toàn bộ bài viết, kịch bản hoặc lời bình vào đây... Hệ thống cam kết giữ nguyên 100% câu chữ của bạn.",
+                height=140,
+                key="unified_custom_script_area"
+            )
+            st.info("💡 **Cam kết bảo toàn:** Giữ nguyên 100% từng câu chữ của bạn, tự động phân đoạn 3-5 giây kèm hiệu ứng cắt dán.")
+
+        # 3. Cấu hình sản xuất: Giọng đọc, Mỹ thuật, Khung hình
+        st.markdown("#### ⚙️ 2. Thiết Lập Sản Xuất")
+        col_cfg1, col_cfg2, col_cfg3 = st.columns(3)
+        with col_cfg1:
+            all_v = fetch_voice_presets()
+            new_voice = st.selectbox("🎙️ Giọng đọc VieNeu-TTS:", options=all_v, key="unified_voice_select")
+        with col_cfg2:
+            art_styles_map = {
+                "paper_collage": "✂️ Cắt dán Nghệ thuật (Collage & Cutout - Chuẩn)",
+                "photorealistic": "📸 Chân thực (Photorealistic)",
+                "cinematic_3d": "🎨 3D Điện ảnh (Cinematic 3D)",
+                "anime": "⛩️ Hoạt hình Nhật Bản (Anime / Manga)",
+                "vintage": "📜 Tài liệu cổ điển (Vintage Documentary)",
+                "watercolor": "🖌️ Tranh màu nước (Watercolor Art)"
+            }
+            new_art_style = st.selectbox(
+                "🎨 Phong cách mỹ thuật (Art Style):",
+                options=list(art_styles_map.keys()),
+                format_func=lambda k: art_styles_map[k],
+                key="unified_art_style_select"
+            )
+        with col_cfg3:
+            new_format = st.selectbox(
+                "📐 Định dạng khung hình:",
+                options=["shorts", "landscape"],
+                format_func=lambda x: "Video Dọc (9:16 - TikTok/Shorts)" if x == "shorts" else "Video Ngang (16:9 - YouTube Standard)",
+                key="unified_format_select"
+            )
+
+        # 4. Hai nút hành động: Tự động hoàn toàn HOẶC Chạy theo 5 bước
+        st.markdown("#### 🚀 3. Chọn Chế Độ Sản Xuất")
+        col_act_auto, col_act_step = st.columns(2)
+
+        with col_act_auto:
+            btn_create_auto = st.button(
+                "⚡ Bắt Đầu Sản Xuất Tự Động (Auto Pipeline)",
+                type="secondary",
+                use_container_width=True,
+                help="Tự động chạy xuyên suốt từ Kịch bản -> Giọng đọc -> Ảnh Storyboard -> Render Master Video không cần dừng lại."
+            )
+
+        with col_act_step:
+            btn_create_step = st.button(
+                "🛠️ Bắt Đầu Phòng Thu 5 Bước (Step-by-Step Studio)",
+                type="primary",
+                use_container_width=True,
+                help="Khởi tạo kịch bản ngay lập tức và đưa bạn vào Bước 1 để kiểm duyệt lời thoại, ảnh trước khi render."
+            )
+
+        if btn_create_auto or btn_create_step:
+            chosen_mode = "auto" if btn_create_auto else "step_by_step"
+            valid = True
+            if new_script_mode == "ai_generate" and not new_topic.strip():
+                st.error("Vui lòng nhập chủ đề video để AI viết kịch bản!")
+                valid = False
+            elif new_script_mode == "custom_script" and not new_custom_script.strip():
+                st.error("Vui lòng dán nội dung kịch bản / lời thoại sẵn có!")
+                valid = False
+
+            if valid:
+                with st.spinner("Đang khởi tạo dự án và thiết lập phòng thu..."):
+                    try:
+                        clean_voice = new_voice
+                        if " — " in clean_voice:
+                            clean_voice = clean_voice.split(" — ")[0].replace("⭐ ", "").strip()
+                        elif "default" in clean_voice.lower():
+                            clean_voice = "default"
+
+                        effective_topic = new_topic.strip() or (new_custom_script.strip()[:40] if new_custom_script else "Video Project")
+
+                        payload = {
+                            "topic": effective_topic,
+                            "style": "collage_broll",
+                            "language": "vi",
+                            "format": new_format,
+                            "quality": "standard",
+                            "mode": chosen_mode,
+                            "art_style": new_art_style,
+                            "voice_preset": clean_voice,
+                            "script_mode": new_script_mode,
+                            "custom_script_text": new_custom_script.strip() if new_script_mode == "custom_script" else None,
+                            "script_style_id": new_style_id if new_script_mode == "ai_generate" else None,
+                            "custom_tone_instruction": new_tone_instruction.strip() if new_tone_instruction else None
+                        }
+                        res_c = api.post(f"{API_URL}/jobs", json=payload, timeout=30.0)
+                        res_c.raise_for_status()
+                        created_job = res_c.json()
+                        new_jid = created_job["id"]
+
+                        # Nếu chọn Step-by-Step và AI generate: sinh kịch bản ngay lập tức để người dùng không phải bấm lại
+                        if chosen_mode == "step_by_step" and new_script_mode == "ai_generate":
+                            with st.spinner("AI đang sáng tạo kịch bản và chia phân cảnh..."):
+                                init_payload = {
+                                    "script_mode": "ai_generate",
+                                    "topic": effective_topic,
+                                    "script_style_id": new_style_id,
+                                    "custom_tone_instruction": new_tone_instruction.strip() if new_tone_instruction else None,
+                                    "duration": new_duration
+                                }
+                                try:
+                                    r_init_sc = api.post(f"{API_URL}/jobs/{new_jid}/initialize-script", json=init_payload, timeout=120.0)
+                                    if r_init_sc.status_code != 200:
+                                        # Fallback sang /step/script
+                                        api.post(
+                                            f"{API_URL}/jobs/{new_jid}/step/script",
+                                            json={"topic": effective_topic, "art_style": new_art_style, "script_style_id": new_style_id, "duration": new_duration},
+                                            timeout=120.0
+                                        )
+                                except Exception as e_init_err:
+                                    st.warning(f"Kịch bản đang được xử lý tiếp tục trong phòng thu ({e_init_err})")
+
+                        st.session_state["selected_job_id"] = new_jid
+                        st.session_state["show_create_project_modal"] = False
+                        st.session_state["studio_active_step"] = 0
+                        st.success(f"🎉 Khởi tạo dự án thành công! Job ID: `{new_jid}`")
+                        st.rerun()
+                    except Exception as e_create:
+                        st.error(f"Lỗi khởi tạo dự án: {e_create}")
+
+    # Nếu chưa có job nào trong hệ thống thì dừng ở đây để người dùng tạo
+    if not all_jobs:
+        st.stop()
+
+
+# =============================================================================
+# NẠP DỮ LIỆU DỰ ÁN ĐANG CHỌN
+# =============================================================================
+if not selected_job_id:
+    st.info("ℹ️ Vui lòng chọn một dự án hoặc bấm **[➕ Tạo Dự Án Mới]** ở trên.")
     st.stop()
 
-job_ids = [j["id"] for j in all_jobs]
-default_index = 0
-if "selected_job_id" in st.session_state and st.session_state["selected_job_id"] in job_ids:
-    default_index = job_ids.index(st.session_state["selected_job_id"])
-
-# =============================================================================
-# 1. Header & Control Bar
-# =============================================================================
-
-st.title("🎬 Studio Tương Tác 5 Bước & Phê Duyệt Video")
-
-c_job_sel, c_job_zip = st.columns([3, 1])
-
-with c_job_sel:
-    selected_job_id = st.selectbox(
-        "🎯 Chọn Dự Án Video Để Làm Việc Trong Studio:",
-        options=job_ids,
-        index=default_index,
-        format_func=lambda jid: next((
-            f"[{j.get('stage', 'pending').upper()}] {j.get('topic', jid)} ({jid[:8]}...) - {'🛠️ Step-by-Step' if j.get('mode') == 'step_by_step' else '⚡ Auto'}"
-            for j in all_jobs if j["id"] == jid
-        ), jid)
-    )
-
-st.session_state["selected_job_id"] = selected_job_id
-job = get_job_details(selected_job_id) or next(j for j in all_jobs if j["id"] == selected_job_id)
+job = get_job_details(selected_job_id) or next((j for j in all_jobs if j["id"] == selected_job_id), None)
+if not job:
+    st.error(f"Không tìm thấy thông tin dự án `{selected_job_id}`.")
+    st.stop()
 
 stage = job.get("stage", "pending")
 mode = job.get("mode", "auto")
@@ -252,32 +608,14 @@ art_style = job.get("art_style", "photorealistic")
 voice_preset = job.get("voice_preset", "default")
 pipeline_data = job.get("pipeline_data") or {}
 
-# Download .ZIP Button - Always visible at the top Header Bar
-with c_job_zip:
-    st.markdown("<div style='height: 28px;'></div>", unsafe_allow_html=True)
-    zip_bytes = get_or_create_project_zip(selected_job_id)
-    if zip_bytes:
-        st.download_button(
-            label="📦 Tải Trọn Gói Dự Án (.ZIP)",
-            data=zip_bytes,
-            file_name=f"project_{selected_job_id}.zip",
-            mime="application/zip",
-            type="primary",
-            use_container_width=True,
-            key=f"header_dl_zip_{selected_job_id}"
-        )
-    else:
-        st.button(
-            "📦 Tải Trọn Gói Dự Án (.ZIP)",
-            disabled=True,
-            use_container_width=True,
-            help="Tài nguyên dự án chưa sẵn sàng hoặc đang khởi tạo."
-        )
 
-# Stage Display Badge
+# =============================================================================
+# THANH TRẠNG THÁI & TIẾN TRÌNH DỰ ÁN
+# =============================================================================
 stage_badges_info = {
     "pending": ("⏳ Đang khởi tạo (Pending)", "#6c757d"),
     "script_ready": ("📝 Kịch bản đã sẵn sàng (Script Ready)", "#0d6efd"),
+    "source_review": ("⛔ Chờ kiểm chứng nguồn (Source Review)", "#ffc107"),
     "voice_ready": ("🎙️ Âm thanh VieNeu-TTS đã sẵn sàng (Voice Ready)", "#198754"),
     "assets_ready": ("🖼️ Chờ duyệt Storyboard (Assets Ready)", "#fd7e14"),
     "rendering": ("🎬 Đang render & hiệu ứng (Rendering)", "#6f42c1"),
@@ -345,7 +683,7 @@ if stage == "failed":
             st.error(f"Lỗi kết nối: {ex}")
 
 # ---------------------------------------------------------------------------
-# Source Review Gate (Task 2.2): job đang dừng chờ bổ sung nguồn trích dẫn
+# Source Review Gate: job đang dừng chờ bổ sung nguồn trích dẫn
 # ---------------------------------------------------------------------------
 if stage == "source_review":
     _audit = pipeline_data.get("source_audit") or []
@@ -404,10 +742,10 @@ if stage == "source_review":
             except Exception as ex:
                 st.error(f"Lỗi kết nối: {ex}")
 
+
 # =============================================================================
 # 5 Functional Tabs (Interactive 5-Stage Studio)
 # =============================================================================
-
 
 @st.fragment(run_every="2s")
 def render_live_progress_box(jid: str):
@@ -426,6 +764,7 @@ def render_live_progress_box(jid: str):
                             st.caption(log_line)
     except Exception:
         pass
+
 
 STEP_LABELS = [
     "📝 1. Kịch Bản",
@@ -490,7 +829,7 @@ if active_step == 0:
                 st.code(prompt_text, language="markdown")
 
         # Thanh thao tác: Lưu kịch bản, Viết lại (kèm 1 dropdown phong cách duy nhất), Chuyển sang Bước 2
-        col_s1, col_s2, col_s3 = st.columns([1, 1.3, 1])
+        col_s1, col_s2, col_s3 = st.columns([1, 1.4, 1])
 
         with col_s1:
             btn_save_script = st.button(
@@ -596,7 +935,7 @@ if active_step == 0:
                     r_post = api.post(
                         f"{API_URL}/jobs/{selected_job_id}/step/script",
                         json={"topic": job.get("topic"), "art_style": art_style, "script_style_id": regen_style},
-                        timeout=60.0
+                        timeout=120.0
                     )
                     if r_post.status_code == 200:
                         st.success("🎉 Đã viết lại kịch bản mới thành công!")
@@ -674,7 +1013,7 @@ if active_step == 0:
             st.markdown("<hr style='margin:10px 0; border:none; border-top:1px solid #333;'>", unsafe_allow_html=True)
 
     # =========================================================================
-    # TRƯỜNG HỢP 2: DỰ ÁN CHƯA CÓ KỊCH BẢN (not scenes) -> CHỈ HIỂN THỊ KHUNG KHỞI TẠO
+    # TRƯỜNG HỢP 2: DỰ ÁN CHƯA CÓ KỊCH BẢN (not scenes) -> KHUNG KHỞI TẠO CHO JOB HIỆN TẠI
     # =========================================================================
     else:
         st.warning("⚠️ **Dự án chưa có kịch bản hoặc phân cảnh.** Bạn hãy chọn 1 trong các cách dưới đây để bắt đầu:")
@@ -702,7 +1041,7 @@ if active_step == 0:
                 st.write("")
                 st.write("")
                 if st.button("🚀 AI Viết Kịch Bản Ngay", type="primary", use_container_width=True, key=f"hub_btn_ai_{selected_job_id}"):
-                    with st.spinner("AI đang tạo kịch bản (có thể mất 15-30 giây)..."):
+                    with st.spinner("AI đang tạo kịch bản (khoảng 5-15 giây)..."):
                         success = False
                         try:
                             payload = {
@@ -711,16 +1050,14 @@ if active_step == 0:
                                 "script_style_id": hub_style_sel,
                                 "duration": dur_ai
                             }
-                            # Thử gọi /initialize-script trước
-                            r_init = api.post(f"{API_URL}/jobs/{selected_job_id}/initialize-script", json=payload, timeout=60.0)
+                            r_init = api.post(f"{API_URL}/jobs/{selected_job_id}/initialize-script", json=payload, timeout=120.0)
                             if r_init.status_code == 200:
                                 success = True
                             elif r_init.status_code == 404:
-                                # Fallback sang /step/script nếu API cũ chưa kịp reload route mới
                                 r_step = api.post(
                                     f"{API_URL}/jobs/{selected_job_id}/step/script",
                                     json={"topic": topic_ai.strip() or job.get("topic"), "art_style": art_style, "script_style_id": hub_style_sel, "duration": dur_ai},
-                                    timeout=60.0
+                                    timeout=120.0
                                 )
                                 if r_step.status_code == 200:
                                     success = True
@@ -784,6 +1121,9 @@ if active_step == 0:
                     except Exception as e_auto:
                         st.error(f"Lỗi kích hoạt: {e_auto}")
 
+# -----------------------------------------------------------------------------
+# TAB 2: 🎙️ Âm Thanh (Voice Stage)
+# -----------------------------------------------------------------------------
 elif active_step == 1:
     st.subheader("🎙️ Giai Đoạn 2: Âm Thanh & Giọng Đọc (Voice Stage)")
     st.caption("Khởi tạo giọng đọc VieNeu-TTS cho toàn bộ kịch bản, nghe thử từng cảnh, sửa lời thoại và sinh lại âm thanh độc lập.")
@@ -793,7 +1133,6 @@ elif active_step == 1:
     active_preset = voice_data.get("preset", voice_preset)
     st.markdown(f"**Công nghệ:** `{engine_name}` | **Mẫu giọng (Preset):** `{active_preset}`")
 
-    # Primary Action Button
     col_vbtn1, col_vbtn2 = st.columns([2, 1])
     with col_vbtn1:
         if st.button(
@@ -826,7 +1165,6 @@ elif active_step == 1:
             st.session_state["studio_active_step"] = 2
             st.rerun()
 
-    # Scene audio list
     voice_scenes = voice_data.get("scenes") or []
     if not voice_scenes and scenes:
         voice_scenes = [
@@ -903,16 +1241,6 @@ elif active_step == 2:
         "user_uploaded": "📤 User Uploaded"
     }
 
-    # Tùy chỉnh thông số phụ đề
-    c_fx_in1, c_fx_in2, c_fx_in3 = st.columns(3)
-    with c_fx_in1:
-        chunk_words_val = st.slider("Số từ mỗi cụm phụ đề:", min_value=2, max_value=5, value=3, key=f"chunk_words_{selected_job_id}")
-    with c_fx_in2:
-        margin_v_val = st.slider("Vị trí lề dưới (MarginV, px):", min_value=120, max_value=320, value=180, key=f"margin_v_{selected_job_id}")
-    with c_fx_in3:
-        font_size_val = st.slider("Cỡ chữ phụ đề (pt):", min_value=32, max_value=64, value=44, key=f"font_size_{selected_job_id}")
-
-    # Primary Action Buttons
     col_sb1, col_sb2 = st.columns([2, 1])
     with col_sb1:
         if st.button(
@@ -945,7 +1273,6 @@ elif active_step == 2:
             st.session_state["studio_active_step"] = 3
             st.rerun()
 
-    # Storyboard Scene Cards
     storyboard = pipeline_data.get("storyboard") or []
     if not storyboard and scenes:
         storyboard = [
@@ -979,7 +1306,6 @@ elif active_step == 2:
                 badge_str = tier_badges.get(tier, f"🏷️ {tier}")
                 st.markdown(f"**Phân tầng:** `{badge_str}`")
 
-                # Task 5.3: badge nguồn gốc asset (provenance) cạnh badge Tier
                 _src_badges = {
                     "imagen": "🤖 Nguồn: Imagen 3 (AI)",
                     "flux": "🤖 Nguồn: FLUX (AI)",
@@ -1104,7 +1430,6 @@ elif active_step == 3:
     st.subheader("🎬 Giai Đoạn 4: Hiệu Ứng Ken Burns & Phụ Đề Karaoke ASS (Effects Stage)")
     st.caption("Khởi tạo phụ đề động Karaoke Dynamic Chunked ASS (2-4 từ/cụm, margin 180px safe zone) và chuẩn bị lệnh FFmpeg hiệu ứng Ken Burns.")
 
-    # Tùy chỉnh thông số phụ đề
     c_fx_in1, c_fx_in2, c_fx_in3 = st.columns(3)
     with c_fx_in1:
         chunk_words_val = st.slider("Số từ mỗi cụm phụ đề:", min_value=2, max_value=5, value=3, key=f"chunk_words_{selected_job_id}")
@@ -1113,7 +1438,6 @@ elif active_step == 3:
     with c_fx_in3:
         font_size_val = st.slider("Cỡ chữ phụ đề (pt):", min_value=32, max_value=64, value=44, key=f"font_size_{selected_job_id}")
 
-    # Primary Action Buttons
     col_fx1, col_fx2 = st.columns([2, 1])
     with col_fx1:
         if st.button(
@@ -1146,7 +1470,6 @@ elif active_step == 3:
             st.session_state["studio_active_step"] = 4
             st.rerun()
 
-    # Technical Specifications
     c_fx_p1, c_fx_p2 = st.columns(2)
     with c_fx_p1:
         st.markdown("**Thông Số Chuyển Động Ken Burns:**")
@@ -1161,7 +1484,6 @@ elif active_step == 3:
         st.markdown("- Kiểu chữ: `Arial 44pt Bold`")
         st.markdown("- Màu sắc: `TikTokYellow (&H0000FFFF)` & `TikTokWhite (&H00FFFFFF)`")
 
-    # Visual Preview Box (Simulated 9:16 TikTok Screen with Subtitle Safe Zone)
     st.markdown("**Trực Quan Hóa Vùng An Toàn Phụ Đề (Safe Zone Preview):**")
     st.markdown("""
     <div style="background-color:#14171f; border:2px solid #333; border-radius:12px; padding:20px; max-width:320px; height:460px; margin:10px auto; position:relative; box-shadow:0 8px 20px rgba(0,0,0,0.6); overflow:hidden;">
@@ -1182,7 +1504,6 @@ elif active_step == 3:
     </div>
     """, unsafe_allow_html=True)
 
-    # Technical FFmpeg Commands Code Block
     st.markdown("**Lệnh Kỹ Thuật FFmpeg Sinh Tự Động:**")
     ffmpeg_cmds = pipeline_data.get("ffmpeg_commands") or "# Lệnh FFmpeg sẽ được sinh tự động khi đến giai đoạn render."
     if isinstance(ffmpeg_cmds, list):
@@ -1196,7 +1517,6 @@ elif active_step == 4:
     st.subheader("🏆 Giai Đoạn 5: Master Video & Phê Duyệt Xuất Bản (Final Stage)")
     st.caption("Ghép toàn bộ phân cảnh bằng FFmpeg, xem trước video hoàn chỉnh, chỉnh sửa bản nháp Postiz và phê duyệt xuất bản.")
 
-    # Primary Action Button
     if st.button(
         "🚀 Ghép & Render Master Video Hoàn Thiện",
         type="primary",
@@ -1218,7 +1538,6 @@ elif active_step == 4:
             except Exception as ex:
                 st.error(f"Lỗi kết nối: {ex}")
 
-    # Video Player and Postiz Form
     out_file = job.get("output_path") or f"data/output/{selected_job_id}/final_video.mp4"
     valid_video_file = None
     if out_file and os.path.exists(out_file):
@@ -1256,7 +1575,6 @@ elif active_step == 4:
         else:
             st.info("⚠️ Video Master chưa được xuất. Hãy bấm nút **[🚀 Ghép & Render Master Video Hoàn Thiện]** ở trên để tạo video.")
 
-        # Download ZIP button in Tab 5 as well
         st.markdown("---")
         st.markdown("#### 📦 Đóng Gói Tài Nguyên Dự Án")
         zip_bytes_tab5 = get_or_create_project_zip(selected_job_id)
@@ -1278,7 +1596,6 @@ elif active_step == 4:
                 help="Tài nguyên ZIP chưa sẵn sàng"
             )
 
-        # Thumbnail review/edit (Task 3.2)
         st.markdown("---")
         st.markdown("#### 🖼️ Thumbnail Master")
         thumbnail_meta = pipeline_data.get("metadata") or job.get("metadata") or {}

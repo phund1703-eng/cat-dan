@@ -13,7 +13,7 @@ load_dotenv()
 # gemini-3.7-flash da bi Google khai tu (404 tren Generative Language API, doi thanh
 # id -tiered); theo huong dan migration cua Google, fallback chi giu gemini-3.8-flash
 # va alias gemini-flash-latest.
-DEFAULT_FALLBACK_MODELS = ["gemini-3.8-flash", "gemini-flash-latest"]
+DEFAULT_FALLBACK_MODELS = ["gemini-3-flash-preview", "gemini-3.1-flash-lite", "gemini-3.5-flash", "gemini-3.8-flash", "gemini-flash-latest"]
 
 class GeminiClient:
     """Client for interacting with Google's Gemini API with Dual-Key Failover and Dynamic Model Fallback support."""
@@ -115,7 +115,7 @@ class GeminiClient:
                             prompt,
                             generation_config=generation_config
                         ),
-                        timeout=50.0
+                        timeout=35.0
                     )
                     return response.text
                 except Exception as e:
@@ -164,7 +164,7 @@ class GeminiClient:
                             prompt,
                             generation_config=generation_config
                         ),
-                        timeout=50.0
+                        timeout=35.0
                     )
                     
                     try:

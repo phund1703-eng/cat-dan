@@ -76,7 +76,8 @@ def render_home_page():
     q1, q2, q3 = st.columns(3)
     with q1:
         if st.button("➕ Bắt Đầu Tạo Video Mới", type="primary", use_container_width=True):
-            st.switch_page("pages/create_video.py")
+            st.session_state["show_create_project_modal"] = True
+            st.switch_page("pages/preview_approve.py")
     with q2:
         if st.button("🎬 Mở Phòng Thu & Duyệt 5 Bước", use_container_width=True):
             st.switch_page("pages/preview_approve.py")
@@ -146,15 +147,14 @@ def render_home_page():
 
 # Khai báo cấu trúc điều hướng mới (Sidebar Navigation)
 home_page = st.Page(render_home_page, title="Trang Chủ & Điều Khiển", icon="🏠", default=True)
-create_page = st.Page("pages/create_video.py", title="1. Tạo Dự Án Video Mới", icon="➕")
-studio_page = st.Page("pages/preview_approve.py", title="2. Phòng Thu & Duyệt 5 Bước", icon="🎬")
-list_page = st.Page("pages/job_list.py", title="3. Danh Sách Dự Án", icon="📋")
-analytics_page = st.Page("pages/analytics.py", title="4. Thống Kê & Hiệu Suất", icon="📊")
+studio_page = st.Page("pages/preview_approve.py", title="🎬 Phòng Thu & Sản Xuất Video", icon="🎬")
+list_page = st.Page("pages/job_list.py", title="📋 Danh Sách Dự Án", icon="📋")
+analytics_page = st.Page("pages/analytics.py", title="📊 Thống Kê & Hiệu Suất", icon="📊")
 
 pg = st.navigation(
     {
         "TỔNG QUAN": [home_page],
-        "QUY TRÌNH SẢN XUẤT VIDEO": [create_page, studio_page],
+        "QUY TRÌNH SẢN XUẤT VIDEO": [studio_page],
         "QUẢN LÝ & BÁO CÁO": [list_page, analytics_page],
     }
 )
